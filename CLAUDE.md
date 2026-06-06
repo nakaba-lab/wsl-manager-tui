@@ -54,8 +54,8 @@ The app is a Model–View–Update loop. Three message types (`src/app/message.r
 
 - **`Event`** — what the runtime feeds in: `Key` / `Resize` / `Tick` / `Frame`.
 - **`Action`** — what the reducer consumes: an `Event`, *or* the result of a finished side effect
-  (`Refreshed`, `MetricsSampled`, `InnerDiskSampled`, `OnlineList`, `ConfigLoaded`, `OpDone`,
-  `OpFailed`, `Quit`).
+  (`Refreshed` / `RefreshFailed`, `MetricsSampled`, `InnerDiskSampled`, `OnlineList`,
+  `ConfigLoaded`, `OpDone`, `OpFailed`, `Quit`).
 - **`Command`** — a side effect *described* by the reducer for the runtime to execute.
 
 `update(&mut Model, Action) -> Vec<Command>` (`src/app/update.rs`) is a **pure reducer**: no IO, no
@@ -161,8 +161,9 @@ fields fall back to defaults). `lang: Option<Lang>` where `None` = auto-detect f
 
 ## Conventions
 
-- `.gitattributes` normalizes all text to **LF**; `tests/fixtures/*.bin` are captured UTF-16LE
-  `wsl.exe` output stored as **binary** — never re-encode or "fix" them.
+- `.gitattributes` normalizes all text to **LF** and marks `tests/fixtures/*.bin` as **binary**:
+  any captured UTF-16LE `wsl.exe` output dropped there is stored verbatim — never re-encode or
+  "fix" it. (The dir currently holds only a `.gitkeep` placeholder.)
 - The library error type is `WslError` (`src/error.rs`, `thiserror`), with `Result<T>` aliased to
   `Result<T, WslError>`; the binary surfaces these as `color_eyre` reports.
 - The full design spec lives at `docs/superpowers/specs/2026-06-06-wsl-manager-tui-design.md`.
