@@ -6,8 +6,7 @@
 
 use std::path::PathBuf;
 
-use crossterm::event::KeyEvent;
-
+use super::input::KeyPress;
 use crate::config::ConfigTarget;
 use crate::i18n::{tf, Key, Lang};
 use crate::metrics::MetricsSample;
@@ -18,7 +17,7 @@ use crate::wsl::{Distro, OnlineDistro};
 pub enum Event {
     /// A key press. The runtime filters out key repeat/release events (common
     /// on Windows) so a single press is never handled twice.
-    Key(KeyEvent),
+    Key(KeyPress),
     /// Terminal was resized to (width, height) columns/rows.
     Resize(u16, u16),
     /// Periodic timer tick. Drives list/metrics polling.

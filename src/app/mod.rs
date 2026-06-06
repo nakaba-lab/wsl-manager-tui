@@ -3,6 +3,7 @@
 //! surface and must remain terminal- and IO-independent.
 
 pub mod config_edit;
+pub mod input;
 pub mod message;
 pub mod modal;
 pub mod model;

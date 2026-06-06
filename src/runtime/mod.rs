@@ -18,6 +18,7 @@ use crossterm::event::{Event as CrosstermEvent, EventStream, KeyEventKind};
 use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
+use crate::app::input::{KeyCode, KeyMods, KeyPress};
 use crate::app::{update, Action, Command, Event, LifecycleOp, Model};
 use crate::config::{self, ConfigTarget};
 use crate::i18n::{tf, Key, Lang};
@@ -318,11 +319,35 @@ async fn run_lifecycle(backend: &dyn WslBackend, op: LifecycleOp, lang: Lang) ->
 fn map_event(event: CrosstermEvent) -> Option<Action> {
     match event {
         CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
-            Some(Action::Event(Event::Key(key)))
+            Some(Action::Event(Event::Key(convert_key(key))))
         }
         CrosstermEvent::Resize(w, h) => Some(Action::Event(Event::Resize(w, h))),
         _ => None,
     }
+}
+
+/// Translate a crossterm key event into the app's backend-independent key type.
+fn convert_key(key: crossterm::event::KeyEvent) -> KeyPress {
+    use crossterm::event::{KeyCode as CKeyCode, KeyModifiers as CMods};
+
+    let code = match key.code {
+        CKeyCode::Char(c) => KeyCode::Char(c),
+        CKeyCode::Enter => KeyCode::Enter,
+        CKeyCode::Esc => KeyCode::Esc,
+        CKeyCode::Backspace => KeyCode::Backspace,
+        CKeyCode::Tab => KeyCode::Tab,
+        CKeyCode::BackTab => KeyCode::BackTab,
+        CKeyCode::Up => KeyCode::Up,
+        CKeyCode::Down => KeyCode::Down,
+        CKeyCode::Left => KeyCode::Left,
+        CKeyCode::Right => KeyCode::Right,
+        _ => KeyCode::Other,
+    };
+    let modifiers = KeyMods {
+        ctrl: key.modifiers.contains(CMods::CONTROL),
+        shift: key.modifiers.contains(CMods::SHIFT),
+    };
+    KeyPress { code, modifiers }
 }
 
 #[cfg(test)]

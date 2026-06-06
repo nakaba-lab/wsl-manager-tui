@@ -4,8 +4,7 @@
 
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
+use super::input::{KeyCode, KeyMods as KeyModifiers, KeyPress as KeyEvent};
 use super::{
     Action, Command, ConfigEditState, Confirm, EditMode, Event, FormKind, FormState,
     InstallPickState, LifecycleOp, Modal, Model, ProgressState, TypedConfirm,
