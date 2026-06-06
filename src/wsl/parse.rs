@@ -171,6 +171,24 @@ Ubuntu-24.04           Ubuntu 24.04 LTS\r\n";
         assert!(parse_list_online("").is_empty());
     }
 
+    // Localized (Japanese) prose intro + English column header, as emitted by
+    // `wsl --list --online` on a JA locale. The prose and header must be skipped
+    // and the ASCII distro rows kept.
+    const ONLINE_JA_PROSE: &str =
+        "インストールできる有効なディストリビューションの一覧を次に示します。\r\n\
+'wsl.exe --install <Distro>' を使用してインストールします。\r\n\
+\r\n\
+NAME                   FRIENDLY NAME\r\n\
+Ubuntu                 Ubuntu\r\n\
+Debian                 Debian GNU/Linux\r\n";
+
+    #[test]
+    fn parses_online_list_with_localized_prose() {
+        let items = parse_list_online(ONLINE_JA_PROSE);
+        let names: Vec<&str> = items.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["Ubuntu", "Debian"]);
+    }
+
     #[test]
     fn parses_df_output() {
         let df = "Filesystem     1024-blocks    Used Available Capacity Mounted on\n\

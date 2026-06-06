@@ -11,8 +11,13 @@ pub fn decode_wsl_output(bytes: &[u8]) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
         return decode_utf16le(rest);
     }
-    // Heuristic: UTF-16LE ASCII text has a NUL as every second byte.
-    let looks_utf16 = bytes.len() >= 2 && bytes.iter().skip(1).step_by(2).take(8).any(|&b| b == 0);
+    // Heuristic: UTF-16LE encodes every ASCII character with a NUL high byte.
+    // Scan the *whole* buffer (not just the first few units): localized wsl
+    // output can begin with non-ASCII prose — e.g. `wsl --list --online` on a
+    // Japanese locale starts with "インストール…" whose high bytes are 0x30 —
+    // but it always contains ASCII later (distro ids, "NAME", spaces, newlines),
+    // so a NUL high byte appears somewhere.
+    let looks_utf16 = bytes.len() >= 2 && bytes.iter().skip(1).step_by(2).any(|&b| b == 0);
     if looks_utf16 {
         decode_utf16le(bytes)
     } else {
@@ -74,5 +79,39 @@ mod tests {
         let s = decode_wsl_output(&bytes);
         assert!(s.contains("実行中"));
         assert!(s.contains("Debian"));
+    }
+
+    /// Build BOM-less UTF-16LE bytes from `s` (matches real `wsl --list --online`).
+    fn utf16le_no_bom(s: &str) -> Vec<u8> {
+        let mut v = Vec::new();
+        for u in s.encode_utf16() {
+            v.extend_from_slice(&u.to_le_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn decodes_bomless_utf16_starting_with_non_ascii() {
+        // Regression: `wsl --list --online` on a Japanese locale emits BOM-less
+        // UTF-16LE whose first characters are localized prose (high byte 0x30,
+        // not 0x00). The decoder must still recognise it as UTF-16 rather than
+        // fall back to UTF-8 mojibake (which made the installable list empty).
+        let bytes = utf16le_no_bom(
+            "インストールできる有効なディストリビューションの一覧を次に示します。\r\n\
+\r\n\
+NAME            FRIENDLY NAME\r\n\
+Ubuntu          Ubuntu\r\n\
+Debian          Debian GNU/Linux\r\n",
+        );
+        let decoded = decode_wsl_output(&bytes);
+        assert!(
+            decoded.contains("Ubuntu"),
+            "expected Ubuntu, got: {decoded:?}"
+        );
+        assert!(decoded.contains("FRIENDLY NAME"));
+        assert!(
+            !decoded.contains('\u{FFFD}'),
+            "should be decoded as UTF-16, not UTF-8 mojibake: {decoded:?}"
+        );
     }
 }
