@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crossterm::event::KeyEvent;
 
 use crate::config::ConfigTarget;
+use crate::i18n::{tf, Key, Lang};
 use crate::metrics::MetricsSample;
 use crate::wsl::{Distro, OnlineDistro};
 
@@ -123,25 +124,14 @@ pub enum LifecycleOp {
 }
 
 impl LifecycleOp {
-    /// A short verb for prompts and progress messages.
-    pub fn verb(&self) -> &'static str {
+    /// A localized success message shown after the operation completes.
+    pub fn done_message(&self, lang: Lang) -> String {
         match self {
-            LifecycleOp::Start(_) => "Start",
-            LifecycleOp::Terminate(_) => "Terminate",
-            LifecycleOp::Shutdown => "Shutdown",
-            LifecycleOp::SetDefault(_) => "Set default",
-            LifecycleOp::Unregister(_) => "Unregister",
-        }
-    }
-
-    /// A success message shown after the operation completes.
-    pub fn success_label(&self) -> String {
-        match self {
-            LifecycleOp::Start(name) => format!("Started {name}"),
-            LifecycleOp::Terminate(name) => format!("Terminated {name}"),
-            LifecycleOp::Shutdown => "WSL shut down".to_string(),
-            LifecycleOp::SetDefault(name) => format!("Set {name} as default"),
-            LifecycleOp::Unregister(name) => format!("Unregistered {name}"),
+            LifecycleOp::Start(name) => tf(lang, Key::DoneStarted, &[name]),
+            LifecycleOp::Terminate(name) => tf(lang, Key::DoneTerminated, &[name]),
+            LifecycleOp::Shutdown => tf(lang, Key::DoneShutdown, &[]),
+            LifecycleOp::SetDefault(name) => tf(lang, Key::DoneSetDefault, &[name]),
+            LifecycleOp::Unregister(name) => tf(lang, Key::DoneUnregistered, &[name]),
         }
     }
 }

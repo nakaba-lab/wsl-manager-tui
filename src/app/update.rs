@@ -11,7 +11,7 @@ use super::{
     InstallPickState, LifecycleOp, Modal, Model, ProgressState, TypedConfirm,
 };
 use crate::config::ConfigTarget;
-use crate::i18n::{tf, Key};
+use crate::i18n::{t, tf, Key};
 
 /// Advance the model in response to an action, returning any side effects.
 pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
@@ -134,7 +134,7 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         (KeyCode::Char('e'), _) => open_export_form(model),
         (KeyCode::Char('m'), _) => open_import_form(model),
         (KeyCode::Char('i'), _) => {
-            model.status = Some("Fetching available distributions…".to_string());
+            model.status = Some(t(model.lang, Key::StatusFetching).to_string());
             return vec![Command::ListOnline];
         }
         (KeyCode::Char('c'), _) => return load_config(model, ConfigTarget::WslConfig),
@@ -161,7 +161,7 @@ fn open_import_form(model: &mut Model) {
 }
 
 fn load_config(model: &mut Model, target: ConfigTarget) -> Vec<Command> {
-    model.status = Some(format!("Loading {}…", target.label()));
+    model.status = Some(tf(model.lang, Key::StatusLoading, &[&target.label()]));
     vec![Command::LoadConfig(target)]
 }
 
@@ -180,7 +180,7 @@ fn start_selected(model: &mut Model) -> Vec<Command> {
     let Some(name) = selected_name(model) else {
         return vec![];
     };
-    model.status = Some(format!("Starting {name}…"));
+    model.status = Some(tf(model.lang, Key::StatusStarting, &[&name]));
     vec![Command::Lifecycle(LifecycleOp::Start(name))]
 }
 
@@ -188,7 +188,7 @@ fn set_default_selected(model: &mut Model) -> Vec<Command> {
     let Some(name) = selected_name(model) else {
         return vec![];
     };
-    model.status = Some(format!("Setting {name} as default…"));
+    model.status = Some(tf(model.lang, Key::StatusSettingDefault, &[&name]));
     vec![Command::Lifecycle(LifecycleOp::SetDefault(name))]
 }
 
@@ -196,7 +196,7 @@ fn launch_inline(model: &mut Model) -> Vec<Command> {
     let Some(name) = selected_name(model) else {
         return vec![];
     };
-    model.status = Some(format!("Launching '{name}' shell…"));
+    model.status = Some(tf(model.lang, Key::StatusLaunchingShell, &[&name]));
     vec![Command::LaunchInlineShell(name)]
 }
 
@@ -368,9 +368,8 @@ fn submit_form(model: &mut Model, form: FormState) -> Vec<Command> {
                 model.modal = Some(Modal::Form(form));
                 return vec![];
             }
-            model.modal = Some(Modal::Progress(ProgressState::new(format!(
-                "Exporting '{distro}'"
-            ))));
+            let title = tf(model.lang, Key::ProgExporting, &[&distro]);
+            model.modal = Some(Modal::Progress(ProgressState::new(title)));
             vec![Command::Export {
                 name: distro,
                 path: PathBuf::from(path),
@@ -384,7 +383,7 @@ fn submit_form(model: &mut Model, form: FormState) -> Vec<Command> {
                 model.modal = Some(Modal::Form(form));
                 return vec![];
             }
-            let title = format!("Importing '{name}'");
+            let title = tf(model.lang, Key::ProgImporting, &[&name]);
             let import = Command::Import {
                 name: name.clone(),
                 dir: PathBuf::from(dir),
@@ -415,7 +414,7 @@ fn handle_progress_key(model: &mut Model, progress: ProgressState, key: KeyEvent
     match key.code {
         // Cancel: close the dialog and ask the runtime to abort the task.
         KeyCode::Esc => {
-            model.status = Some("Cancelling…".to_string());
+            model.status = Some(t(model.lang, Key::StatusCancelling).to_string());
             vec![Command::CancelOp]
         }
         _ => {
@@ -475,7 +474,7 @@ fn handle_config_key(model: &mut Model, mut state: ConfigEditState, key: KeyEven
     if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
         let content = state.rendered();
         let target = state.target.clone();
-        model.status = Some(format!("Saving {}…", target.label()));
+        model.status = Some(tf(model.lang, Key::StatusSaving, &[&target.label()]));
         return vec![Command::SaveConfig { target, content }];
     }
     match key.code {

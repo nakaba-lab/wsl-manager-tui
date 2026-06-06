@@ -2,6 +2,7 @@
 
 use super::config_edit::ConfigEditState;
 use super::message::Command;
+use crate::i18n::Key;
 use crate::wsl::OnlineDistro;
 
 /// An overlay dialog on top of the main list.
@@ -103,8 +104,8 @@ pub enum FormKind {
 pub struct FormState {
     /// Which form this is.
     pub kind: FormKind,
-    /// Field labels (parallel to [`FormState::fields`]).
-    pub labels: Vec<&'static str>,
+    /// Field label keys (parallel to [`FormState::fields`]).
+    pub labels: Vec<Key>,
     /// The editable fields.
     pub fields: Vec<TextField>,
     /// Index of the focused field.
@@ -116,7 +117,7 @@ impl FormState {
     pub fn export(distro: String, default_path: String) -> Self {
         Self {
             kind: FormKind::Export { distro },
-            labels: vec!["Output .tar path"],
+            labels: vec![Key::LabelExportPath],
             fields: vec![TextField::new(default_path)],
             focus: 0,
         }
@@ -126,7 +127,11 @@ impl FormState {
     pub fn import() -> Self {
         Self {
             kind: FormKind::Import,
-            labels: vec!["New distro name", "Install directory", "Source .tar path"],
+            labels: vec![
+                Key::LabelImportName,
+                Key::LabelImportDir,
+                Key::LabelImportTar,
+            ],
             fields: vec![
                 TextField::default(),
                 TextField::default(),

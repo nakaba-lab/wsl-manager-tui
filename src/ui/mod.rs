@@ -15,7 +15,7 @@ use crate::app::{
     ConfigEditState, Confirm, EditMode, FormKind, FormState, InstallPickState, Modal, Model,
     ProgressState,
 };
-use crate::i18n::{t, Key, Lang};
+use crate::i18n::{t, tf, Key, Lang};
 use crate::metrics::MetricsHistory;
 use crate::wsl::{Distro, DistroState};
 
@@ -38,9 +38,10 @@ pub fn view(f: &mut Frame, model: &Model) {
 
 fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
     let lang = model.lang;
+    let detail = t(lang, Key::DetailTitle);
     let title = match model.selected_distro() {
-        Some(distro) => format!(" Detail: {} ", distro.name),
-        None => " Detail ".to_string(),
+        Some(distro) => format!(" {detail}: {} ", distro.name),
+        None => format!(" {detail} "),
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
@@ -178,7 +179,7 @@ fn render_status(f: &mut Frame, model: &Model, area: Rect) {
     }
     let (text, style) = if !model.filter.is_empty() {
         (
-            format!("filter: {} · Esc clears", model.filter),
+            tf(lang, Key::FilterApplied, &[&model.filter]),
             Style::default().fg(Color::Yellow),
         )
     } else if let Some(error) = &model.last_error {
@@ -203,66 +204,47 @@ fn render_modal(f: &mut Frame, modal: &Modal, lang: Lang, area: Rect) {
     match modal {
         Modal::Confirm(confirm) => render_confirm(f, confirm, lang, area),
         Modal::Error { message } => render_error(f, message, lang, area),
-        Modal::Form(form) => render_form(f, form, area),
+        Modal::Form(form) => render_form(f, form, lang, area),
         Modal::Progress(progress) => render_progress(f, progress, lang, area),
         Modal::InstallPick(pick) => render_install_pick(f, pick, lang, area),
         Modal::ConfigEdit(state) => render_config_edit(f, state, lang, area),
-        Modal::Help => render_help(f, area),
-        Modal::Quit => render_quit(f, area),
+        Modal::Help => render_help(f, lang, area),
+        Modal::Quit => render_quit(f, lang, area),
     }
 }
 
-fn render_help(f: &mut Frame, area: Rect) {
+fn render_help(f: &mut Frame, lang: Lang, area: Rect) {
     let popup = centered_rect(66, 24, area);
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Help — keybindings ");
-    let text = "\
- j/k · ↑/↓     move selection
- /             filter list (Esc clears)
- Enter         inline shell (exit returns to wslm)
- w             shell in a new Windows Terminal tab
- s             start (boot) the distro
- x             stop (terminate) the distro
- X             shut down the whole WSL VM
- d             set as default
- u             unregister — delete (type name to confirm)
- e             export to a .tar backup
- m             import from a .tar
- i             install from the online catalog
- c / C         edit .wslconfig / wsl.conf
- L             toggle English / Japanese
- r             refresh now
- ?             this help
- q             quit  (Ctrl+C forces quit)
-
- Press any key to close.";
-    f.render_widget(Paragraph::new(text).block(block), popup);
+        .title(t(lang, Key::HelpTitle));
+    f.render_widget(Paragraph::new(t(lang, Key::HelpBody)).block(block), popup);
 }
 
-fn render_quit(f: &mut Frame, area: Rect) {
+fn render_quit(f: &mut Frame, lang: Lang, area: Rect) {
     let popup = centered_rect(44, 5, area);
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Quit ")
+        .title(t(lang, Key::QuitTitle))
         .border_style(Style::default().fg(Color::Yellow));
-    f.render_widget(
-        Paragraph::new("Quit wslm?\n\nEnter / y: quit · Esc / n: stay").block(block),
-        popup,
-    );
+    f.render_widget(Paragraph::new(t(lang, Key::QuitPrompt)).block(block), popup);
 }
 
 fn render_config_edit(f: &mut Frame, state: &ConfigEditState, lang: Lang, area: Rect) {
     let popup = centered_rect(82, 26, area);
     f.render_widget(Clear, popup);
-    let mode = match state.mode {
-        EditMode::Form => "Form",
-        EditMode::Raw => "Raw",
-    };
+    let mode = t(
+        lang,
+        match state.mode {
+            EditMode::Form => Key::ModeForm,
+            EditMode::Raw => Key::ModeRaw,
+        },
+    );
     let block = Block::default().borders(Borders::ALL).title(format!(
-        " Edit {} [{}] ",
+        " {} {} [{}] ",
+        t(lang, Key::ConfigEditPrefix),
         state.target.label(),
         mode
     ));
@@ -305,11 +287,14 @@ fn render_config_raw(f: &mut Frame, state: &ConfigEditState, area: Rect) {
     f.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), area);
 }
 
-fn render_form(f: &mut Frame, form: &FormState, area: Rect) {
-    let title = match &form.kind {
-        FormKind::Export { .. } => " Export distribution ",
-        FormKind::Import => " Import distribution ",
-    };
+fn render_form(f: &mut Frame, form: &FormState, lang: Lang, area: Rect) {
+    let title = t(
+        lang,
+        match &form.kind {
+            FormKind::Export { .. } => Key::FormExportTitle,
+            FormKind::Import => Key::FormImportTitle,
+        },
+    );
     let popup = centered_rect(72, form.fields.len() as u16 * 2 + 5, area);
     f.render_widget(Clear, popup);
     let block = Block::default().borders(Borders::ALL).title(title);
@@ -317,15 +302,17 @@ fn render_form(f: &mut Frame, form: &FormState, area: Rect) {
     f.render_widget(block, popup);
 
     let mut text = String::new();
-    for (i, label) in form.labels.iter().enumerate() {
+    for (i, &label) in form.labels.iter().enumerate() {
         let marker = if i == form.focus { "▶ " } else { "  " };
         let cursor = if i == form.focus { "▏" } else { "" };
         text.push_str(&format!(
-            "{marker}{label}:\n    {}{cursor}\n",
+            "{marker}{}:\n    {}{cursor}\n",
+            t(lang, label),
             form.fields[i].value
         ));
     }
-    text.push_str("\nTab / ↑↓: move · Enter: submit · Esc: cancel");
+    text.push('\n');
+    text.push_str(t(lang, Key::FormFooter));
     f.render_widget(Paragraph::new(text), inner);
 }
 
@@ -334,7 +321,7 @@ fn render_progress(f: &mut Frame, progress: &ProgressState, lang: Lang, area: Re
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Working ")
+        .title(t(lang, Key::ProgressTitle))
         .border_style(Style::default().fg(Color::Cyan));
     let text = format!(
         "{} {}…\n\n{}",
@@ -361,7 +348,7 @@ fn render_install_pick(f: &mut Frame, pick: &InstallPickState, lang: Lang, area:
     ])
     .split(inner);
 
-    f.render_widget(Paragraph::new(format!("filter: {}", pick.filter)), rows[0]);
+    f.render_widget(Paragraph::new(format!("/{}", pick.filter)), rows[0]);
 
     let filtered = pick.filtered();
     let items: Vec<ListItem> = filtered
@@ -384,9 +371,10 @@ fn render_confirm(f: &mut Frame, confirm: &Confirm, lang: Lang, area: Rect) {
     let mut lines: Vec<String> = confirm.prompt.lines().map(String::from).collect();
     if let Some(typed) = &confirm.require_typed {
         lines.push(String::new());
-        lines.push(format!(
-            "type \"{}\" to confirm: {}",
-            typed.expected, typed.input
+        lines.push(tf(
+            lang,
+            Key::ConfirmTypedLine,
+            &[&typed.expected, &typed.input],
         ));
     }
     lines.push(String::new());
@@ -401,7 +389,7 @@ fn render_confirm(f: &mut Frame, confirm: &Confirm, lang: Lang, area: Rect) {
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Confirm ")
+        .title(t(lang, Key::ConfirmTitle))
         .border_style(Style::default().fg(Color::Yellow));
     f.render_widget(
         Paragraph::new(lines.join("\n"))
@@ -416,7 +404,7 @@ fn render_error(f: &mut Frame, message: &str, lang: Lang, area: Rect) {
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Error ")
+        .title(t(lang, Key::ErrorTitle))
         .border_style(Style::default().fg(Color::Red));
     f.render_widget(
         Paragraph::new(format!("{message}\n\n{}", t(lang, Key::ErrorDismiss)))
@@ -606,6 +594,16 @@ mod tests {
         assert!(rendered.contains('名'), "JA column header missing"); // 名前 (NAME)
         assert!(rendered.contains('実'), "JA running state missing"); // 実行中 (Running)
         assert!(rendered.contains("JA"), "language indicator missing");
+    }
+
+    #[test]
+    fn modals_localize_to_japanese() {
+        let mut model = sample();
+        model.lang = Lang::Ja;
+        model.modal = Some(Modal::Help);
+        let rendered = render(&model, 90, 30);
+        assert!(rendered.contains('ヘ'), "JA help title missing"); // ヘルプ
+        assert!(rendered.contains('移'), "JA help body missing"); // 移動 (move)
     }
 
     #[test]

@@ -37,38 +37,96 @@ impl Lang {
 /// A translatable message key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
+    // Status line / general chrome.
     StatusHint,
     Loading,
     ErrorPrefix,
     NoDistros,
+    FilterApplied,
+    // Table columns.
     ColName,
     ColState,
     ColVer,
     ColDefault,
     ColDisk,
+    // Detail pane.
+    DetailTitle,
     DetailState,
     DetailVersion,
     DetailDefault,
     DetailDisk,
     DetailPath,
     DetailVmMem,
+    // Distro state.
     StateRunning,
     StateStopped,
     StateInstalling,
     StateUnknown,
     VmNotRunning,
     VmSharedNote,
+    // Modal titles.
+    ConfirmTitle,
+    ErrorTitle,
+    ProgressTitle,
+    HelpTitle,
+    QuitTitle,
+    FormExportTitle,
+    FormImportTitle,
+    ConfigEditPrefix,
+    ModeForm,
+    ModeRaw,
+    // Modal hints / bodies.
     ConfirmHintTyped,
     ConfirmHintYesNo,
+    ConfirmTypedLine,
     ErrorDismiss,
     ProgressHint,
     InstallTitle,
     InstallHint,
     ConfigSaveHint,
+    FormFooter,
+    HelpBody,
+    QuitPrompt,
+    // Form field labels.
+    LabelExportPath,
+    LabelImportName,
+    LabelImportDir,
+    LabelImportTar,
+    // Prompts.
     PromptTerminate,
     PromptShutdown,
     PromptUnregister,
     PromptImportOverwrite,
+    // Transient status messages.
+    StatusFetching,
+    StatusLoading,
+    StatusStarting,
+    StatusSettingDefault,
+    StatusLaunchingShell,
+    StatusCancelling,
+    StatusSaving,
+    StatusReturnedFrom,
+    // Progress titles.
+    ProgExporting,
+    ProgImporting,
+    ProgInstalling,
+    // Operation results.
+    DoneStarted,
+    DoneTerminated,
+    DoneShutdown,
+    DoneSetDefault,
+    DoneUnregistered,
+    DoneExported,
+    DoneImported,
+    DoneInstalled,
+    DoneOpenedTab,
+    DoneSavedConfig,
+    FailOp,
+    FailListOnline,
+    FailLoadConfig,
+    FailSaveConfig,
+    WtNotFound,
+    ShellBanner,
 }
 
 impl Key {
@@ -78,11 +136,13 @@ impl Key {
         Key::Loading,
         Key::ErrorPrefix,
         Key::NoDistros,
+        Key::FilterApplied,
         Key::ColName,
         Key::ColState,
         Key::ColVer,
         Key::ColDefault,
         Key::ColDisk,
+        Key::DetailTitle,
         Key::DetailState,
         Key::DetailVersion,
         Key::DetailDefault,
@@ -95,17 +155,62 @@ impl Key {
         Key::StateUnknown,
         Key::VmNotRunning,
         Key::VmSharedNote,
+        Key::ConfirmTitle,
+        Key::ErrorTitle,
+        Key::ProgressTitle,
+        Key::HelpTitle,
+        Key::QuitTitle,
+        Key::FormExportTitle,
+        Key::FormImportTitle,
+        Key::ConfigEditPrefix,
+        Key::ModeForm,
+        Key::ModeRaw,
         Key::ConfirmHintTyped,
         Key::ConfirmHintYesNo,
+        Key::ConfirmTypedLine,
         Key::ErrorDismiss,
         Key::ProgressHint,
         Key::InstallTitle,
         Key::InstallHint,
         Key::ConfigSaveHint,
+        Key::FormFooter,
+        Key::HelpBody,
+        Key::QuitPrompt,
+        Key::LabelExportPath,
+        Key::LabelImportName,
+        Key::LabelImportDir,
+        Key::LabelImportTar,
         Key::PromptTerminate,
         Key::PromptShutdown,
         Key::PromptUnregister,
         Key::PromptImportOverwrite,
+        Key::StatusFetching,
+        Key::StatusLoading,
+        Key::StatusStarting,
+        Key::StatusSettingDefault,
+        Key::StatusLaunchingShell,
+        Key::StatusCancelling,
+        Key::StatusSaving,
+        Key::StatusReturnedFrom,
+        Key::ProgExporting,
+        Key::ProgImporting,
+        Key::ProgInstalling,
+        Key::DoneStarted,
+        Key::DoneTerminated,
+        Key::DoneShutdown,
+        Key::DoneSetDefault,
+        Key::DoneUnregistered,
+        Key::DoneExported,
+        Key::DoneImported,
+        Key::DoneInstalled,
+        Key::DoneOpenedTab,
+        Key::DoneSavedConfig,
+        Key::FailOp,
+        Key::FailListOnline,
+        Key::FailLoadConfig,
+        Key::FailSaveConfig,
+        Key::WtNotFound,
+        Key::ShellBanner,
     ];
 }
 
@@ -113,17 +218,19 @@ impl Key {
 fn entry(key: Key) -> (&'static str, &'static str) {
     match key {
         Key::StatusHint => (
-            "j/k move · Enter shell · s start · x stop · X shutdown · d default · u unreg · e export · m import · i install · c/C config · L lang · r refresh · q quit",
-            "j/k 移動 · Enter シェル · s 起動 · x 停止 · X 全停止 · d 既定 · u 登録解除 · e エクスポート · m インポート · i インストール · c/C 設定 · L 言語 · r 更新 · q 終了",
+            "j/k move · Enter shell · s start · x stop · X shutdown · d default · u unreg · e export · m import · i install · c/C config · L lang · / filter · ? help · q quit",
+            "j/k 移動 · Enter シェル · s 起動 · x 停止 · X 全停止 · d 既定 · u 登録解除 · e エクスポート · m インポート · i インストール · c/C 設定 · L 言語 · / フィルタ · ? ヘルプ · q 終了",
         ),
         Key::Loading => ("loading…", "読み込み中…"),
         Key::ErrorPrefix => ("error", "エラー"),
         Key::NoDistros => ("No distributions.", "ディストリビューションがありません。"),
+        Key::FilterApplied => ("filter: {} · Esc clears", "フィルタ: {} · Esc で解除"),
         Key::ColName => ("NAME", "名前"),
         Key::ColState => ("STATE", "状態"),
         Key::ColVer => ("VER", "Ver"),
         Key::ColDefault => ("DEFAULT", "既定"),
         Key::ColDisk => ("DISK", "ディスク"),
+        Key::DetailTitle => ("Detail", "詳細"),
         Key::DetailState => ("State", "状態"),
         Key::DetailVersion => ("Version", "バージョン"),
         Key::DetailDefault => ("Default", "既定"),
@@ -139,6 +246,16 @@ fn entry(key: Key) -> (&'static str, &'static str) {
             "(vmmemWSL, shared by all distros)",
             "(vmmemWSL, 全ディストロ共有)",
         ),
+        Key::ConfirmTitle => (" Confirm ", " 確認 "),
+        Key::ErrorTitle => (" Error ", " エラー "),
+        Key::ProgressTitle => (" Working ", " 処理中 "),
+        Key::HelpTitle => (" Help — keybindings ", " ヘルプ — キー操作 "),
+        Key::QuitTitle => (" Quit ", " 終了 "),
+        Key::FormExportTitle => (" Export distribution ", " ディストロをエクスポート "),
+        Key::FormImportTitle => (" Import distribution ", " ディストロをインポート "),
+        Key::ConfigEditPrefix => ("Edit", "編集"),
+        Key::ModeForm => ("Form", "フォーム"),
+        Key::ModeRaw => ("Raw", "生"),
         Key::ConfirmHintTyped => (
             "Enter: confirm (must match) · Esc: cancel",
             "Enter: 確定(一致必須) · Esc: キャンセル",
@@ -146,6 +263,10 @@ fn entry(key: Key) -> (&'static str, &'static str) {
         Key::ConfirmHintYesNo => (
             "Enter / y: confirm · Esc / n: cancel",
             "Enter / y: 確定 · Esc / n: キャンセル",
+        ),
+        Key::ConfirmTypedLine => (
+            "type \"{}\" to confirm: {}",
+            "確認のため \"{}\" と入力: {}",
         ),
         Key::ErrorDismiss => ("Press any key to dismiss.", "任意のキーで閉じます。"),
         Key::ProgressHint => (
@@ -164,6 +285,19 @@ fn entry(key: Key) -> (&'static str, &'static str) {
             "Tab: form/raw · Ctrl+S: save · Esc: cancel",
             "Tab: フォーム/生 · Ctrl+S: 保存 · Esc: キャンセル",
         ),
+        Key::FormFooter => (
+            "Tab / ↑↓: move · Enter: submit · Esc: cancel",
+            "Tab / ↑↓: 移動 · Enter: 実行 · Esc: キャンセル",
+        ),
+        Key::HelpBody => (HELP_EN, HELP_JA),
+        Key::QuitPrompt => (
+            "Quit wslm?\n\nEnter / y: quit · Esc / n: stay",
+            "wslm を終了しますか？\n\nEnter / y: 終了 · Esc / n: 戻る",
+        ),
+        Key::LabelExportPath => ("Output .tar path", "出力 .tar パス"),
+        Key::LabelImportName => ("New distro name", "新しいディストロ名"),
+        Key::LabelImportDir => ("Install directory", "インストール先ディレクトリ"),
+        Key::LabelImportTar => ("Source .tar path", "元 .tar パス"),
         Key::PromptTerminate => ("Terminate (stop) '{}'?", "'{}' を停止しますか？"),
         Key::PromptShutdown => (
             "Shut down ALL running WSL distributions?",
@@ -177,8 +311,95 @@ fn entry(key: Key) -> (&'static str, &'static str) {
             "'{}' already exists. Overwrite it?",
             "'{}' は既に存在します。上書きしますか？",
         ),
+        Key::StatusFetching => (
+            "Fetching available distributions…",
+            "インストール可能なディストロを取得中…",
+        ),
+        Key::StatusLoading => ("Loading {}…", "{} を読み込み中…"),
+        Key::StatusStarting => ("Starting {}…", "{} を起動中…"),
+        Key::StatusSettingDefault => ("Setting {} as default…", "{} を既定に設定中…"),
+        Key::StatusLaunchingShell => ("Launching '{}' shell…", "'{}' のシェルを起動中…"),
+        Key::StatusCancelling => ("Cancelling…", "キャンセル中…"),
+        Key::StatusSaving => ("Saving {}…", "{} を保存中…"),
+        Key::StatusReturnedFrom => ("Returned from '{}'", "'{}' から復帰しました"),
+        Key::ProgExporting => ("Exporting '{}'", "'{}' をエクスポート中"),
+        Key::ProgImporting => ("Importing '{}'", "'{}' をインポート中"),
+        Key::ProgInstalling => ("Installing '{}'", "'{}' をインストール中"),
+        Key::DoneStarted => ("Started {}", "{} を起動しました"),
+        Key::DoneTerminated => ("Terminated {}", "{} を停止しました"),
+        Key::DoneShutdown => ("WSL shut down", "WSL を全停止しました"),
+        Key::DoneSetDefault => ("Set {} as default", "{} を既定に設定しました"),
+        Key::DoneUnregistered => ("Unregistered {}", "{} を登録解除しました"),
+        Key::DoneExported => ("Exported '{}'", "'{}' をエクスポートしました"),
+        Key::DoneImported => ("Imported '{}'", "'{}' をインポートしました"),
+        Key::DoneInstalled => ("Installed '{}'", "'{}' をインストールしました"),
+        Key::DoneOpenedTab => (
+            "Opened '{}' in a new Windows Terminal tab",
+            "'{}' を Windows Terminal の新規タブで開きました",
+        ),
+        Key::DoneSavedConfig => (
+            "Saved {} — run `wsl --shutdown` to apply",
+            "{} を保存しました — 反映には `wsl --shutdown` が必要です",
+        ),
+        Key::FailOp => ("Operation failed: {}", "操作に失敗しました: {}"),
+        Key::FailListOnline => (
+            "Failed to list online distros: {}",
+            "オンライン一覧の取得に失敗: {}",
+        ),
+        Key::FailLoadConfig => ("Failed to load config: {}", "設定の読み込みに失敗: {}"),
+        Key::FailSaveConfig => ("Failed to save config: {}", "設定の保存に失敗: {}"),
+        Key::WtNotFound => (
+            "Windows Terminal (wt.exe) not found. Press Enter for an inline shell instead.",
+            "Windows Terminal (wt.exe) が見つかりません。Enter でインラインシェルを使ってください。",
+        ),
+        Key::ShellBanner => (
+            "Launching WSL shell for '{}' — type 'exit' to return to wslm.",
+            "'{}' の WSL シェルを起動します — 'exit' で wslm に戻ります。",
+        ),
     }
 }
+
+const HELP_EN: &str = "\
+ j/k · ↑/↓     move selection
+ /             filter list (Esc clears)
+ Enter         inline shell (exit returns to wslm)
+ w             shell in a new Windows Terminal tab
+ s             start (boot) the distro
+ x             stop (terminate) the distro
+ X             shut down the whole WSL VM
+ d             set as default
+ u             unregister — delete (type name to confirm)
+ e             export to a .tar backup
+ m             import from a .tar
+ i             install from the online catalog
+ c / C         edit .wslconfig / wsl.conf
+ L             toggle English / Japanese
+ r             refresh now
+ ?             this help
+ q             quit  (Ctrl+C forces quit)
+
+ Press any key to close.";
+
+const HELP_JA: &str = "\
+ j/k · ↑/↓     選択を移動
+ /             一覧をフィルタ (Esc で解除)
+ Enter         インラインシェル (exit で wslm に復帰)
+ w             Windows Terminal の新規タブでシェル
+ s             起動 (boot)
+ x             停止 (terminate)
+ X             WSL VM 全体を停止
+ d             既定に設定
+ u             登録解除 — 削除 (名前入力で確認)
+ e             .tar にエクスポート
+ m             .tar からインポート
+ i             オンライン一覧からインストール
+ c / C         .wslconfig / wsl.conf を編集
+ L             英語 / 日本語 切替
+ r             今すぐ更新
+ ?             このヘルプ
+ q             終了  (Ctrl+C で強制終了)
+
+ 任意のキーで閉じます。";
 
 /// The translated string for `key` in `lang`.
 pub fn t(lang: Lang, key: Key) -> &'static str {
@@ -239,6 +460,14 @@ mod tests {
         assert_eq!(
             tf(Lang::Ja, Key::PromptTerminate, &["Debian"]),
             "'Debian' を停止しますか？"
+        );
+    }
+
+    #[test]
+    fn tf_handles_two_placeholders() {
+        assert_eq!(
+            tf(Lang::En, Key::ConfirmTypedLine, &["Debian", "Deb"]),
+            "type \"Debian\" to confirm: Deb"
         );
     }
 }

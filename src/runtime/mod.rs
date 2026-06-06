@@ -20,6 +20,7 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::app::{update, Action, Command, Event, LifecycleOp, Model};
 use crate::config::{self, ConfigTarget};
+use crate::i18n::{tf, Key, Lang};
 use crate::metrics;
 use crate::prefs::Prefs;
 use crate::ui;
@@ -58,8 +59,8 @@ async fn event_loop(
     let mut current_op: Option<tokio::task::AbortHandle> = None;
 
     // Kick off the initial load and metrics sample immediately.
-    dispatch(Command::RefreshList, &backend, &action_tx);
-    dispatch(Command::SampleMetrics, &backend, &action_tx);
+    dispatch(Command::RefreshList, &backend, &action_tx, model.lang);
+    dispatch(Command::SampleMetrics, &backend, &action_tx, model.lang);
 
     loop {
         tui.draw(|f| ui::view(f, model))?;
@@ -81,15 +82,16 @@ async fn event_loop(
         };
 
         for command in update(model, action) {
+            let lang = model.lang;
             match command {
                 // Inline shell needs the terminal, so it runs here (not as a
                 // spawned task): suspend the TUI, hand over the console, resume.
                 Command::LaunchInlineShell(name) => {
-                    run_inline_shell(tui, &name).await?;
-                    model.status = Some(format!("Returned from '{name}'"));
-                    dispatch(Command::RefreshList, &backend, &action_tx);
+                    run_inline_shell(tui, &name, lang).await?;
+                    model.status = Some(tf(lang, Key::StatusReturnedFrom, &[&name]));
+                    dispatch(Command::RefreshList, &backend, &action_tx, lang);
                 }
-                Command::LaunchTabShell(name) => launch_tab_shell(&name, &action_tx),
+                Command::LaunchTabShell(name) => launch_tab_shell(&name, &action_tx, lang),
                 // Long-running, cancellable operations: keep the abort handle so
                 // a later CancelOp (or a superseding op) can kill the child.
                 command @ (Command::Export { .. }
@@ -98,7 +100,7 @@ async fn event_loop(
                     if let Some(previous) = current_op.take() {
                         previous.abort();
                     }
-                    current_op = Some(spawn_long_op(command, &backend, &action_tx));
+                    current_op = Some(spawn_long_op(command, &backend, &action_tx, lang));
                 }
                 Command::CancelOp => {
                     if let Some(handle) = current_op.take() {
@@ -109,7 +111,7 @@ async fn event_loop(
                     prefs.lang = Some(model.lang);
                     let _ = crate::prefs::save(&prefs);
                 }
-                spawnable => dispatch(spawnable, &backend, &action_tx),
+                spawnable => dispatch(spawnable, &backend, &action_tx, lang),
             }
         }
     }
@@ -122,27 +124,29 @@ fn spawn_long_op(
     command: Command,
     backend: &Arc<dyn WslBackend>,
     tx: &UnboundedSender<Action>,
+    lang: Lang,
 ) -> tokio::task::AbortHandle {
     let backend = Arc::clone(backend);
     let tx = tx.clone();
     let task = tokio::spawn(async move {
         let (label, result) = match &command {
             Command::Export { name, path } => (
-                format!("Exported '{name}'"),
+                tf(lang, Key::DoneExported, &[name]),
                 backend.export(name, path).await,
             ),
             Command::Import { name, dir, tar } => (
-                format!("Imported '{name}'"),
+                tf(lang, Key::DoneImported, &[name]),
                 backend.import(name, dir, tar).await,
             ),
-            Command::Install { name } => {
-                (format!("Installed '{name}'"), backend.install(name).await)
-            }
+            Command::Install { name } => (
+                tf(lang, Key::DoneInstalled, &[name]),
+                backend.install(name).await,
+            ),
             _ => return,
         };
         let action = match result {
             Ok(()) => Action::OpDone(label),
-            Err(error) => Action::OpFailed(error.to_string()),
+            Err(error) => Action::OpFailed(tf(lang, Key::FailOp, &[&error.to_string()])),
         };
         let _ = tx.send(action);
     });
@@ -152,9 +156,9 @@ fn spawn_long_op(
 /// Suspend the TUI, run `wsl -d <name>` with the console handed over, then
 /// resume. Failures to spawn the shell are reported but never abort the app;
 /// only terminal suspend/resume errors propagate.
-async fn run_inline_shell(tui: &mut Tui, name: &str) -> Result<()> {
+async fn run_inline_shell(tui: &mut Tui, name: &str, lang: Lang) -> Result<()> {
     tui.suspend()?;
-    println!("\nLaunching WSL shell for '{name}' — type 'exit' to return to wslm.\n");
+    println!("\n{}\n", tf(lang, Key::ShellBanner, &[name]));
 
     let distro = name.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
@@ -174,24 +178,28 @@ async fn run_inline_shell(tui: &mut Tui, name: &str) -> Result<()> {
 
 /// Open an interactive shell in a new Windows Terminal tab. Reports success or,
 /// if `wt.exe` is missing, suggests the inline shell instead.
-fn launch_tab_shell(name: &str, tx: &UnboundedSender<Action>) {
+fn launch_tab_shell(name: &str, tx: &UnboundedSender<Action>, lang: Lang) {
     let result = std::process::Command::new("wt.exe")
         .args(["-w", "0", "nt", "wsl.exe", "-d", name])
         .spawn();
     let action = match result {
-        Ok(_child) => Action::OpDone(format!("Opened '{name}' in a new Windows Terminal tab")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Action::OpFailed(
-            "Windows Terminal (wt.exe) not found. Press Enter for an inline shell instead."
-                .to_string(),
-        ),
-        Err(error) => Action::OpFailed(format!("Failed to open tab: {error}")),
+        Ok(_child) => Action::OpDone(tf(lang, Key::DoneOpenedTab, &[name])),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Action::OpFailed(tf(lang, Key::WtNotFound, &[]))
+        }
+        Err(error) => Action::OpFailed(tf(lang, Key::FailOp, &[&error.to_string()])),
     };
     let _ = tx.send(action);
 }
 
 /// Execute a command as an async task, sending the resulting action back over
 /// the channel.
-fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSender<Action>) {
+fn dispatch(
+    command: Command,
+    backend: &Arc<dyn WslBackend>,
+    tx: &UnboundedSender<Action>,
+    lang: Lang,
+) {
     let backend = Arc::clone(backend);
     let tx = tx.clone();
     match command {
@@ -214,7 +222,7 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
         }
         Command::Lifecycle(op) => {
             tokio::spawn(async move {
-                let action = run_lifecycle(backend.as_ref(), op).await;
+                let action = run_lifecycle(backend.as_ref(), op, lang).await;
                 let _ = tx.send(action);
             });
         }
@@ -223,7 +231,7 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                 let action = match backend.list_online().await {
                     Ok(items) => Action::OnlineList(items),
                     Err(error) => {
-                        Action::OpFailed(format!("Failed to list online distros: {error}"))
+                        Action::OpFailed(tf(lang, Key::FailListOnline, &[&error.to_string()]))
                     }
                 };
                 let _ = tx.send(action);
@@ -239,7 +247,7 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                 };
                 let action = match result {
                     Ok(content) => Action::ConfigLoaded { target, content },
-                    Err(error) => Action::OpFailed(format!("Failed to load config: {error}")),
+                    Err(error) => Action::OpFailed(tf(lang, Key::FailLoadConfig, &[&error])),
                 };
                 let _ = tx.send(action);
             });
@@ -254,11 +262,8 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                         .map_err(|e| e.to_string()),
                 };
                 let action = match result {
-                    Ok(()) => Action::OpDone(format!(
-                        "Saved {} — run `wsl --shutdown` to apply",
-                        target.label()
-                    )),
-                    Err(error) => Action::OpFailed(format!("Failed to save config: {error}")),
+                    Ok(()) => Action::OpDone(tf(lang, Key::DoneSavedConfig, &[&target.label()])),
+                    Err(error) => Action::OpFailed(tf(lang, Key::FailSaveConfig, &[&error])),
                 };
                 let _ = tx.send(action);
             });
@@ -293,7 +298,7 @@ async fn save_wslconfig(content: String) -> std::result::Result<(), String> {
 
 /// Run a lifecycle operation through the backend and map the outcome to an
 /// [`Action`].
-async fn run_lifecycle(backend: &dyn WslBackend, op: LifecycleOp) -> Action {
+async fn run_lifecycle(backend: &dyn WslBackend, op: LifecycleOp, lang: Lang) -> Action {
     let result = match &op {
         LifecycleOp::Start(name) => backend.start(name).await,
         LifecycleOp::Terminate(name) => backend.terminate(name).await,
@@ -302,8 +307,8 @@ async fn run_lifecycle(backend: &dyn WslBackend, op: LifecycleOp) -> Action {
         LifecycleOp::Unregister(name) => backend.unregister(name).await,
     };
     match result {
-        Ok(()) => Action::OpDone(op.success_label()),
-        Err(error) => Action::OpFailed(format!("{} failed: {error}", op.verb())),
+        Ok(()) => Action::OpDone(op.done_message(lang)),
+        Err(error) => Action::OpFailed(tf(lang, Key::FailOp, &[&error.to_string()])),
     }
 }
 
@@ -396,7 +401,12 @@ mod tests {
     #[tokio::test]
     async fn lifecycle_success_calls_backend_and_maps_to_opdone() {
         let mock = MockBackend::default();
-        let action = run_lifecycle(&mock, LifecycleOp::Terminate("Debian".to_string())).await;
+        let action = run_lifecycle(
+            &mock,
+            LifecycleOp::Terminate("Debian".to_string()),
+            Lang::En,
+        )
+        .await;
         assert!(matches!(action, Action::OpDone(_)));
         assert_eq!(
             mock.calls.lock().unwrap().as_slice(),
@@ -410,7 +420,7 @@ mod tests {
             fail: true,
             ..Default::default()
         };
-        let action = run_lifecycle(&mock, LifecycleOp::Shutdown).await;
+        let action = run_lifecycle(&mock, LifecycleOp::Shutdown, Lang::En).await;
         assert!(matches!(action, Action::OpFailed(_)));
         assert_eq!(
             mock.calls.lock().unwrap().as_slice(),
