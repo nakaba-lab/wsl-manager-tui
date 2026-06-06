@@ -66,14 +66,26 @@ pub fn exports_dir(root: &Path) -> PathBuf {
     root.join("exports")
 }
 
-/// The `installed\<name>\` folder for an imported distro.
+/// The `installed\<name>\` folder for an imported distro. The name is sanitised
+/// to a single safe component (see [`sanitize_name`]).
 pub fn installed_dir(root: &Path, name: &str) -> PathBuf {
-    root.join("installed").join(sanitize_name(name))
+    let component = sanitize_name(name);
+    debug_assert!(
+        !component.is_empty()
+            && component != "."
+            && component != ".."
+            && !component.contains(['/', '\\']),
+        "sanitize_name must yield a safe single component, got {component:?}"
+    );
+    root.join("installed").join(component)
 }
 
-/// Replace characters illegal in Windows file names with `_`.
+/// Replace characters illegal in Windows file names with `_`, then guard against
+/// path-traversal and reserved names so the result is always a single safe path
+/// component (never empty, `.`, `..`, a separator, or a reserved device name).
 pub fn sanitize_name(name: &str) -> String {
-    name.chars()
+    let cleaned: String = name
+        .chars()
         .map(|c| {
             if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control() {
                 '_'
@@ -81,9 +93,31 @@ pub fn sanitize_name(name: &str) -> String {
                 c
             }
         })
-        .collect::<String>()
-        .trim()
-        .to_string()
+        .collect();
+    // Windows path normalisation drops trailing dots/spaces and treats `.`/`..`
+    // as navigation, so strip leading/trailing dots and whitespace.
+    let trimmed = cleaned.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    if trimmed.is_empty() || is_reserved_component(trimmed) {
+        return "_".to_string();
+    }
+    trimmed.to_string()
+}
+
+/// Whether `s` is a Windows reserved device name (case-insensitive, with or
+/// without an extension): `CON`, `PRN`, `AUX`, `NUL`, `COM1`..=`COM9`,
+/// `LPT1`..=`LPT9`.
+fn is_reserved_component(s: &str) -> bool {
+    let stem = s.split('.').next().unwrap_or(s).to_ascii_uppercase();
+    const RESERVED: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    if RESERVED.contains(&stem.as_str()) {
+        return true;
+    }
+    if (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 {
+        if let Some(d) = stem.as_bytes().get(3) {
+            return d.is_ascii_digit() && *d != b'0';
+        }
+    }
+    false
 }
 
 /// The default export filename: `<distro>-<local_ts>.tar`. `local_ts` is the
@@ -92,15 +126,16 @@ pub fn export_filename(distro: &str, local_ts: &str) -> String {
     format!("{}-{}.tar", sanitize_name(distro), local_ts)
 }
 
-/// A distro-name default derived from an archive filename (extension stripped).
+/// A distro-name default derived from an archive filename (archive extension
+/// stripped, then sanitised so it is always a safe path component).
 pub fn derive_distro_name(archive_filename: &str) -> String {
     let lower = archive_filename.to_ascii_lowercase();
-    for ext in ARCHIVE_EXTS {
-        if lower.ends_with(ext) {
-            return archive_filename[..archive_filename.len() - ext.len()].to_string();
-        }
-    }
-    archive_filename.to_string()
+    let stem = ARCHIVE_EXTS
+        .iter()
+        .find(|ext| lower.ends_with(*ext))
+        .map(|ext| &archive_filename[..archive_filename.len() - ext.len()])
+        .unwrap_or(archive_filename);
+    sanitize_name(stem)
 }
 
 use std::cmp::Reverse;
@@ -224,6 +259,37 @@ mod tests {
     #[test]
     fn sanitize_replaces_illegal_chars() {
         assert_eq!(sanitize_name("a:b/c"), "a_b_c");
+    }
+
+    #[test]
+    fn sanitize_blocks_traversal_and_reserved() {
+        assert_eq!(sanitize_name(".."), "_");
+        assert_eq!(sanitize_name("."), "_");
+        assert_eq!(sanitize_name("   .. "), "_");
+        assert_eq!(sanitize_name("foo."), "foo");
+        assert_eq!(sanitize_name("CON"), "_");
+        assert_eq!(sanitize_name("nul.tar"), "_");
+        assert_eq!(sanitize_name("COM1"), "_");
+        assert_eq!(sanitize_name("lpt9.txt"), "_");
+        assert_eq!(sanitize_name("COM0"), "COM0"); // COM0 is not reserved
+                                                   // never yields a separator or a traversal component
+        for bad in ["..\\..\\Windows", "../../etc", "a/b\\c"] {
+            let s = sanitize_name(bad);
+            assert!(!s.contains(['/', '\\']), "{bad:?} -> {s:?}");
+            assert_ne!(s, "..");
+        }
+    }
+
+    #[test]
+    fn derive_name_is_safe() {
+        assert_eq!(derive_distro_name("...tar"), "_"); // stem ".."
+        assert_eq!(derive_distro_name("CON.tar"), "_");
+        // normal names are unchanged (existing behaviour preserved)
+        assert_eq!(
+            derive_distro_name("Ubuntu-20260607.tar.gz"),
+            "Ubuntu-20260607"
+        );
+        assert_eq!(derive_distro_name("box.vhdx"), "box");
     }
 
     use std::sync::atomic::{AtomicU32, Ordering};
