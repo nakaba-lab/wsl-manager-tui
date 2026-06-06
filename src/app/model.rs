@@ -3,6 +3,7 @@
 use super::modal::Modal;
 use crate::i18n::Lang;
 use crate::metrics::MetricsHistory;
+use crate::prefs::{KeybindStyle, ShellLaunch};
 use crate::wsl::Distro;
 
 /// The full application state. Rendered by [`crate::ui`] and mutated only by
@@ -31,6 +32,10 @@ pub struct Model {
     pub metrics: MetricsHistory,
     /// The current UI language.
     pub lang: Lang,
+    /// How navigation keys behave.
+    pub keybind_style: KeybindStyle,
+    /// What `Enter` launches on the list.
+    pub default_shell_launch: ShellLaunch,
     /// False until the first refresh completes (drives a "loading" hint).
     pub loaded: bool,
 }

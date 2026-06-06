@@ -36,6 +36,8 @@ pub async fn run(prefs: Prefs) -> Result<()> {
     let backend: Arc<dyn WslBackend> = Arc::new(RealWslBackend);
     let mut model = Model {
         lang: prefs.effective_lang(),
+        keybind_style: prefs.keybind_style,
+        default_shell_launch: prefs.default_shell_launch,
         metrics: metrics::MetricsHistory::new(prefs.history_len),
         ..Default::default()
     };
@@ -414,6 +416,9 @@ mod tests {
         }
         async fn install(&self, name: &str) -> Result<()> {
             self.record(format!("install {name}"))
+        }
+        async fn inner_disk(&self, _distro: &str) -> Result<Option<(u64, u64)>> {
+            Ok(None)
         }
         async fn read_conf(&self, _distro: &str) -> Result<String> {
             Ok(String::new())

@@ -53,4 +53,6 @@ pub struct Distro {
     pub vhd_path: Option<PathBuf>,
     /// Size of the vhdx on disk, in bytes.
     pub disk_bytes: Option<u64>,
+    /// In-distro root filesystem usage as (used, total) bytes, when running.
+    pub inner_disk: Option<(u64, u64)>,
 }

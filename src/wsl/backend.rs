@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use crate::error::{Result, WslError};
 use crate::wsl::decode::{decode_utf8, decode_wsl_output};
 use crate::wsl::model::OnlineDistro;
-use crate::wsl::parse::{parse_list_online, parse_list_verbose, RawDistroRow};
+use crate::wsl::parse::{parse_df, parse_list_online, parse_list_verbose, RawDistroRow};
 
 /// Abstraction over the `wsl.exe` CLI so the app can be driven by a mock in
 /// tests. Transfer/install operations are added in later milestones.
@@ -38,6 +38,8 @@ pub trait WslBackend: Send + Sync {
     async fn import(&self, name: &str, dir: &Path, tar: &Path) -> Result<()>;
     /// Install a distro (`wsl --install -d <name> --no-launch`).
     async fn install(&self, name: &str) -> Result<()>;
+    /// In-distro root filesystem usage as `(used, total)` bytes (`df -kP /`).
+    async fn inner_disk(&self, distro: &str) -> Result<Option<(u64, u64)>>;
     /// Read a distro's `/etc/wsl.conf` (as root); empty if it does not exist.
     async fn read_conf(&self, distro: &str) -> Result<String>;
     /// Write a distro's `/etc/wsl.conf` (as root), backing up the old file.
@@ -114,6 +116,19 @@ impl WslBackend for RealWslBackend {
         run_wsl_long(&["--install", "-d", name, "--no-launch"])
             .await
             .map(drop)
+    }
+
+    async fn inner_disk(&self, distro: &str) -> Result<Option<(u64, u64)>> {
+        // In-distro output is UTF-8. `df -kP /` is POSIX and parseable.
+        let output = tokio::process::Command::new("wsl.exe")
+            .args(["-d", distro, "--", "df", "-kP", "/"])
+            .output()
+            .await?;
+        if output.status.success() {
+            Ok(parse_df(&decode_utf8(&output.stdout)))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn read_conf(&self, distro: &str) -> Result<String> {

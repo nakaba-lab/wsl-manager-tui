@@ -36,6 +36,7 @@ pub fn collect_distros(
                 base_path: entry.map(|e| e.base_path.clone()),
                 vhd_path: entry.and_then(registry::vhd_path_of),
                 disk_bytes: None,
+                inner_disk: None,
             }
         })
         .collect()
@@ -52,7 +53,12 @@ pub async fn refresh(backend: &dyn WslBackend) -> Result<Vec<Distro>> {
     let mut distros = collect_distros(rows, &running, &lxss);
     for distro in &mut distros {
         if let Some(path) = &distro.vhd_path {
-            distro.disk_bytes = std::fs::metadata(path).ok().map(|meta| meta.len());
+            distro.disk_bytes = crate::metrics::disk_size(path);
+        }
+        // Best-effort in-distro filesystem usage (only meaningful when running).
+        if distro.state == DistroState::Running {
+            let inner = backend.inner_disk(&distro.name).await.ok().flatten();
+            distro.inner_disk = inner;
         }
     }
     Ok(distros)

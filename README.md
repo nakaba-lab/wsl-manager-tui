@@ -84,8 +84,16 @@ wslm --lang <en|ja>          # override the saved UI language
 wslm --poll-interval <secs>  # override the refresh interval
 ```
 
-Preferences (language, poll interval, history length) are saved to
-`%APPDATA%\wsl-manager-tui\config.toml`.
+Preferences (language, poll interval, history length, keybinding style, and the
+default `Enter` shell-launch mode) are saved to
+`%APPDATA%\wsl-manager-tui\config.toml`. For example:
+
+```toml
+lang = "ja"
+poll_interval_secs = 2
+keybind_style = "both"          # both | arrows-only | vim-only
+default_shell_launch = "inline" # inline | new-tab
+```
 
 ## Development
 

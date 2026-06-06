@@ -89,6 +89,20 @@ fn is_distro_id(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
+/// Parse `df -kP /` output into `(used_bytes, total_bytes)`. Columns are
+/// `Filesystem 1024-blocks Used Available Capacity Mounted-on`; blocks are 1 KiB.
+pub fn parse_df(text: &str) -> Option<(u64, u64)> {
+    for line in text.lines().skip(1) {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() >= 4 {
+            if let (Ok(total), Ok(used)) = (tokens[1].parse::<u64>(), tokens[2].parse::<u64>()) {
+                return Some((used * 1024, total * 1024));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +169,19 @@ Ubuntu-24.04           Ubuntu 24.04 LTS\r\n";
     #[test]
     fn online_list_handles_empty() {
         assert!(parse_list_online("").is_empty());
+    }
+
+    #[test]
+    fn parses_df_output() {
+        let df = "Filesystem     1024-blocks    Used Available Capacity Mounted on\n\
+/dev/sdc            1000000  250000    750000      25% /\n";
+        // 1000000 KiB total, 250000 KiB used.
+        assert_eq!(parse_df(df), Some((250000 * 1024, 1000000 * 1024)));
+    }
+
+    #[test]
+    fn parse_df_handles_garbage() {
+        assert_eq!(parse_df(""), None);
+        assert_eq!(parse_df("not a df output\n"), None);
     }
 }

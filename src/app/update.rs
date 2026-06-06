@@ -11,6 +11,7 @@ use super::{
 };
 use crate::config::ConfigTarget;
 use crate::i18n::{t, tf, Key};
+use crate::prefs::ShellLaunch;
 
 /// Advance the model in response to an action, returning any side effects.
 pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
@@ -117,13 +118,17 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         }
         (KeyCode::Char('/'), _) => model.filter_mode = true,
         (KeyCode::Char('?'), _) => model.modal = Some(Modal::Help),
-        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => model.select_next(),
-        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => model.select_prev(),
-        // Shift+Enter (where the terminal reports it) and `w` open a new tab;
-        // plain Enter runs an inline shell.
-        (KeyCode::Enter, m) if m.contains(KeyModifiers::SHIFT) => return launch_tab(model),
-        (KeyCode::Enter, _) => return launch_inline(model),
-        (KeyCode::Char('w'), _) => return launch_tab(model),
+        (KeyCode::Down, _) if model.keybind_style.arrows_enabled() => model.select_next(),
+        (KeyCode::Up, _) if model.keybind_style.arrows_enabled() => model.select_prev(),
+        (KeyCode::Char('j'), _) if model.keybind_style.vim_enabled() => model.select_next(),
+        (KeyCode::Char('k'), _) if model.keybind_style.vim_enabled() => model.select_prev(),
+        // Enter follows the default shell-launch preference; Shift+Enter does
+        // the other mode and `w` always opens a new tab.
+        (KeyCode::Enter, m) if m.contains(KeyModifiers::SHIFT) => {
+            return launch_shell(model, model.default_shell_launch.other())
+        }
+        (KeyCode::Enter, _) => return launch_shell(model, model.default_shell_launch),
+        (KeyCode::Char('w'), _) => return launch_shell(model, ShellLaunch::NewTab),
         (KeyCode::Char('r'), _) => return vec![Command::RefreshList],
         (KeyCode::Char('s'), _) => return start_selected(model),
         (KeyCode::Char('d'), _) => return set_default_selected(model),
@@ -189,6 +194,13 @@ fn set_default_selected(model: &mut Model) -> Vec<Command> {
     };
     model.status = Some(tf(model.lang, Key::StatusSettingDefault, &[&name]));
     vec![Command::Lifecycle(LifecycleOp::SetDefault(name))]
+}
+
+fn launch_shell(model: &mut Model, mode: ShellLaunch) -> Vec<Command> {
+    match mode {
+        ShellLaunch::Inline => launch_inline(model),
+        ShellLaunch::NewTab => launch_tab(model),
+    }
 }
 
 fn launch_inline(model: &mut Model) -> Vec<Command> {
@@ -545,6 +557,7 @@ mod tests {
             base_path: None,
             vhd_path: None,
             disk_bytes: None,
+            inner_disk: None,
         }
     }
 
@@ -1032,5 +1045,38 @@ mod tests {
         let cmds = update(&mut m, key(KeyCode::Char('L'), KeyModifiers::SHIFT));
         assert_eq!(m.lang, Lang::Ja);
         assert_eq!(cmds, vec![Command::SavePrefs]);
+    }
+
+    #[test]
+    fn arrows_only_disables_vim_keys() {
+        use crate::prefs::KeybindStyle;
+        let mut m = model_with(&["a", "b"]);
+        m.keybind_style = KeybindStyle::ArrowsOnly;
+        update(&mut m, ch('j'));
+        assert_eq!(m.selected, 0, "j must not move when arrows-only");
+        update(&mut m, key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(m.selected, 1, "arrows still move");
+    }
+
+    #[test]
+    fn vim_only_disables_arrows() {
+        use crate::prefs::KeybindStyle;
+        let mut m = model_with(&["a", "b"]);
+        m.keybind_style = KeybindStyle::VimOnly;
+        update(&mut m, key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(m.selected, 0, "arrows must not move when vim-only");
+        update(&mut m, ch('j'));
+        assert_eq!(m.selected, 1);
+    }
+
+    #[test]
+    fn default_shell_launch_newtab_makes_enter_open_a_tab() {
+        let mut m = model_with(&["Debian"]);
+        m.default_shell_launch = ShellLaunch::NewTab;
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(cmds, vec![Command::LaunchTabShell("Debian".into())]);
+        // Shift+Enter does the other mode (inline).
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::SHIFT));
+        assert_eq!(cmds, vec![Command::LaunchInlineShell("Debian".into())]);
     }
 }

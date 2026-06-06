@@ -3,6 +3,7 @@
 //! single machine-wide figure (surfaced as such in the UI). No UI here.
 
 use std::collections::VecDeque;
+use std::path::Path;
 
 use sysinfo::{ProcessesToUpdate, System};
 
@@ -37,6 +38,12 @@ pub fn sample() -> MetricsSample {
         vmmem_bytes,
         total_mem_bytes: system.total_memory(),
     }
+}
+
+/// The size of a file on disk (e.g. a distro's `ext4.vhdx`), in bytes. Returns
+/// `None` if the path cannot be read.
+pub fn disk_size(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|meta| meta.len())
 }
 
 /// Whether a process name is the WSL VM. Handles both the current `vmmemWSL`

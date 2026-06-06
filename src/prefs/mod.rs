@@ -7,6 +7,52 @@ use serde::{Deserialize, Serialize};
 
 use crate::i18n::{detect_default_lang, Lang};
 
+/// How list navigation keys behave.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KeybindStyle {
+    /// Both arrow keys and vim keys (`j`/`k`).
+    #[default]
+    Both,
+    /// Arrow keys only.
+    ArrowsOnly,
+    /// Vim keys only.
+    VimOnly,
+}
+
+impl KeybindStyle {
+    /// Whether `j`/`k` move the selection.
+    pub fn vim_enabled(self) -> bool {
+        matches!(self, KeybindStyle::Both | KeybindStyle::VimOnly)
+    }
+
+    /// Whether the arrow keys move the selection.
+    pub fn arrows_enabled(self) -> bool {
+        matches!(self, KeybindStyle::Both | KeybindStyle::ArrowsOnly)
+    }
+}
+
+/// What `Enter` does on the distro list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ShellLaunch {
+    /// Suspend the TUI and run the shell inline.
+    #[default]
+    Inline,
+    /// Open the shell in a new Windows Terminal tab.
+    NewTab,
+}
+
+impl ShellLaunch {
+    /// The other launch mode (used for the Shift+Enter override).
+    pub fn other(self) -> ShellLaunch {
+        match self {
+            ShellLaunch::Inline => ShellLaunch::NewTab,
+            ShellLaunch::NewTab => ShellLaunch::Inline,
+        }
+    }
+}
+
 /// Persisted user preferences.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -17,6 +63,10 @@ pub struct Prefs {
     pub poll_interval_secs: u64,
     /// Number of samples retained for the memory sparkline.
     pub history_len: usize,
+    /// How navigation keys behave.
+    pub keybind_style: KeybindStyle,
+    /// What `Enter` launches on the list.
+    pub default_shell_launch: ShellLaunch,
 }
 
 impl Default for Prefs {
@@ -25,6 +75,8 @@ impl Default for Prefs {
             lang: None,
             poll_interval_secs: 2,
             history_len: 60,
+            keybind_style: KeybindStyle::Both,
+            default_shell_launch: ShellLaunch::Inline,
         }
     }
 }
@@ -78,6 +130,8 @@ mod tests {
             lang: Some(Lang::Ja),
             poll_interval_secs: 5,
             history_len: 120,
+            keybind_style: KeybindStyle::VimOnly,
+            default_shell_launch: ShellLaunch::NewTab,
         };
         let text = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Prefs = toml::from_str(&text).unwrap();

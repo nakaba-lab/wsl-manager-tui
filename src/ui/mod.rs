@@ -25,7 +25,7 @@ pub fn view(f: &mut Frame, model: &Model) {
     let area = f.area();
     let chunks = Layout::vertical([
         Constraint::Min(5),
-        Constraint::Length(8),
+        Constraint::Length(9),
         Constraint::Length(1),
     ])
     .split(area);
@@ -70,7 +70,7 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
         .map(human_size)
         .unwrap_or_else(|| "—".to_string());
     let default = if distro.is_default { "★" } else { "—" };
-    let info = format!(
+    let mut info = format!(
         "{}: {}\n{}: {}    {}: {}\n{}: {}\n{}: {}\n{}: {}",
         t(lang, Key::DetailState),
         state_label(lang, distro.state),
@@ -85,6 +85,14 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
         t(lang, Key::DetailVmMem),
         vm_mem_line(lang, &model.metrics),
     );
+    if let Some((used, total)) = distro.inner_disk {
+        info.push_str(&format!(
+            "\n{}: {} / {}",
+            t(lang, Key::DetailInnerDisk),
+            human_size(used),
+            human_size(total)
+        ));
+    }
     f.render_widget(Paragraph::new(info), rows[0]);
 
     let data = model.metrics.sparkline();
@@ -503,6 +511,7 @@ mod tests {
                 base_path: None,
                 vhd_path: None,
                 disk_bytes: Some(4 * 1024 * 1024 * 1024),
+                inner_disk: None,
             }],
             loaded: true,
             ..Default::default()
@@ -684,6 +693,7 @@ mod tests {
             base_path: None,
             vhd_path: None,
             disk_bytes: None,
+            inner_disk: None,
         }
     }
 }
