@@ -1,5 +1,6 @@
 //! The application model (state). It grows with each milestone.
 
+use super::modal::Modal;
 use crate::wsl::Distro;
 
 /// The full application state. Rendered by [`crate::ui`] and mutated only by
@@ -14,8 +15,12 @@ pub struct Model {
     pub distros: Vec<Distro>,
     /// Index of the selected row in [`Model::distros`].
     pub selected: usize,
-    /// The most recent error message, if any.
+    /// The most recent background error (e.g. a failed refresh).
     pub last_error: Option<String>,
+    /// A transient status message (e.g. the result of an operation).
+    pub status: Option<String>,
+    /// The active modal overlay, if any.
+    pub modal: Option<Modal>,
     /// False until the first refresh completes (drives a "loading" hint).
     pub loaded: bool,
 }

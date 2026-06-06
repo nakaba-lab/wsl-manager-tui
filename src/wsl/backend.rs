@@ -7,14 +7,24 @@ use crate::error::{Result, WslError};
 use crate::wsl::decode::decode_wsl_output;
 use crate::wsl::parse::{parse_list_verbose, RawDistroRow};
 
-/// Abstraction over the `wsl.exe` CLI. Read-only listing for now; lifecycle and
-/// transfer operations are added in later milestones.
+/// Abstraction over the `wsl.exe` CLI so the app can be driven by a mock in
+/// tests. Transfer/install operations are added in later milestones.
 #[async_trait]
 pub trait WslBackend: Send + Sync {
     /// `wsl -l -v`: every registered distro with name, version and default flag.
     async fn list_verbose(&self) -> Result<Vec<RawDistroRow>>;
     /// `wsl --list --running -q`: names of currently running distros.
     async fn list_running(&self) -> Result<Vec<String>>;
+    /// Boot a distro (`wsl -d <name> -- true`).
+    async fn start(&self, name: &str) -> Result<()>;
+    /// Stop a single distro (`wsl --terminate <name>`).
+    async fn terminate(&self, name: &str) -> Result<()>;
+    /// Stop the whole WSL VM (`wsl --shutdown`).
+    async fn shutdown(&self) -> Result<()>;
+    /// Set the default distro (`wsl --set-default <name>`).
+    async fn set_default(&self, name: &str) -> Result<()>;
+    /// Unregister (permanently delete) a distro (`wsl --unregister <name>`).
+    async fn unregister(&self, name: &str) -> Result<()>;
 }
 
 /// The real backend that shells out to `wsl.exe`.
@@ -40,6 +50,27 @@ impl WslBackend for RealWslBackend {
             .filter(|line| !line.is_empty())
             .map(str::to_string)
             .collect())
+    }
+
+    async fn start(&self, name: &str) -> Result<()> {
+        // Running any trivial command boots the distro.
+        run_wsl(&["-d", name, "--", "true"]).await.map(drop)
+    }
+
+    async fn terminate(&self, name: &str) -> Result<()> {
+        run_wsl(&["--terminate", name]).await.map(drop)
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        run_wsl(&["--shutdown"]).await.map(drop)
+    }
+
+    async fn set_default(&self, name: &str) -> Result<()> {
+        run_wsl(&["--set-default", name]).await.map(drop)
+    }
+
+    async fn unregister(&self, name: &str) -> Result<()> {
+        run_wsl(&["--unregister", name]).await.map(drop)
     }
 }
 

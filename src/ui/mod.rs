@@ -1,13 +1,13 @@
 //! View layer: pure rendering of the [`Model`] into ratatui widgets. Renders
-//! only; never mutates state. (M2: the distro table and a status line; the
-//! detail pane, modals and help arrive in later milestones.)
+//! only; never mutates state. (M3: distro table, status line, and confirm/error
+//! modals; the detail pane and other modals arrive in later milestones.)
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::Frame;
 
-use crate::app::Model;
+use crate::app::{Confirm, Modal, Model};
 use crate::wsl::{Distro, DistroState};
 
 /// Render the whole UI for the current model.
@@ -16,6 +16,9 @@ pub fn view(f: &mut Frame, model: &Model) {
     let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(area);
     render_table(f, model, chunks[0]);
     render_status(f, model, chunks[1]);
+    if let Some(modal) = &model.modal {
+        render_modal(f, modal, area);
+    }
 }
 
 fn render_table(f: &mut Frame, model: &Model, area: Rect) {
@@ -74,18 +77,85 @@ fn state_label(state: DistroState) -> &'static str {
 fn render_status(f: &mut Frame, model: &Model, area: Rect) {
     let (text, style) = if let Some(error) = &model.last_error {
         (format!("error: {error}"), Style::default().fg(Color::Red))
+    } else if let Some(status) = &model.status {
+        (status.clone(), Style::default().fg(Color::Green))
     } else if !model.loaded {
         ("loading…".to_string(), Style::default().fg(Color::DarkGray))
     } else {
         (
             format!(
-                "{} distro(s) · ↑/↓ or j/k: move · r: refresh · q: quit",
+                "{} distro(s) · j/k move · s start · x stop · X shutdown · d default · u unreg · r refresh · q quit",
                 model.distros.len()
             ),
             Style::default(),
         )
     };
     f.render_widget(Paragraph::new(text).style(style), area);
+}
+
+fn render_modal(f: &mut Frame, modal: &Modal, area: Rect) {
+    match modal {
+        Modal::Confirm(confirm) => render_confirm(f, confirm, area),
+        Modal::Error { message } => render_error(f, message, area),
+    }
+}
+
+fn render_confirm(f: &mut Frame, confirm: &Confirm, area: Rect) {
+    let mut lines: Vec<String> = confirm.prompt.lines().map(String::from).collect();
+    if let Some(typed) = &confirm.require_typed {
+        lines.push(String::new());
+        lines.push(format!(
+            "type \"{}\" to confirm: {}",
+            typed.expected, typed.input
+        ));
+    }
+    lines.push(String::new());
+    lines.push(if confirm.require_typed.is_some() {
+        "Enter: confirm (must match) · Esc: cancel".to_string()
+    } else {
+        "Enter / y: confirm · Esc / n: cancel".to_string()
+    });
+
+    let height = lines.len() as u16 + 2;
+    let popup = centered_rect(64, height, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm ")
+        .border_style(Style::default().fg(Color::Yellow));
+    f.render_widget(
+        Paragraph::new(lines.join("\n"))
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
+fn render_error(f: &mut Frame, message: &str, area: Rect) {
+    let popup = centered_rect(64, 7, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Error ")
+        .border_style(Style::default().fg(Color::Red));
+    f.render_widget(
+        Paragraph::new(format!("{message}\n\nPress any key to dismiss."))
+            .block(block)
+            .wrap(Wrap { trim: true }),
+        popup,
+    );
+}
+
+/// A centered rectangle of the given size, clamped to `area`.
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
+        width,
+        height,
+    }
 }
 
 /// Human-readable byte size using binary units.
@@ -107,9 +177,22 @@ fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{Confirm, LifecycleOp, Modal, TypedConfirm};
     use crate::wsl::{Distro, DistroState};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    fn render(model: &Model, w: u16, h: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| view(f, model)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
 
     fn sample() -> Model {
         Model {
@@ -130,20 +213,28 @@ mod tests {
 
     #[test]
     fn renders_title_and_distro() {
-        let mut terminal = Terminal::new(TestBackend::new(72, 10)).unwrap();
-        let model = sample();
-        terminal.draw(|f| view(f, &model)).unwrap();
-        let rendered: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect();
+        let rendered = render(&sample(), 110, 10);
         assert!(rendered.contains("WSL Manager"), "title missing");
         assert!(rendered.contains("Debian"), "distro name missing");
         assert!(rendered.contains("Running"), "state missing");
         assert!(rendered.contains("4.0 GB"), "disk size missing");
+    }
+
+    #[test]
+    fn renders_confirm_modal() {
+        let mut model = sample();
+        model.modal = Some(Modal::Confirm(Confirm {
+            op: LifecycleOp::Unregister("Debian".to_string()),
+            prompt: "PERMANENTLY delete 'Debian'.".to_string(),
+            require_typed: Some(TypedConfirm {
+                expected: "Debian".to_string(),
+                input: "Deb".to_string(),
+            }),
+        }));
+        let rendered = render(&model, 110, 16);
+        assert!(rendered.contains("Confirm"), "confirm title missing");
+        assert!(rendered.contains("PERMANENTLY"), "prompt missing");
+        assert!(rendered.contains("type"), "typed hint missing");
     }
 
     #[test]
