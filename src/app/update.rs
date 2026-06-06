@@ -12,6 +12,7 @@ use super::{
 use crate::config::ConfigTarget;
 use crate::i18n::{t, tf, Key};
 use crate::prefs::ShellLaunch;
+use crate::wsl::DistroState;
 
 /// Advance the model in response to an action, returning any side effects.
 pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
@@ -20,12 +21,21 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
             model.should_quit = true;
             vec![]
         }
-        Action::Refreshed(distros) => {
+        Action::Refreshed(mut distros) => {
+            // Carry forward already-fetched in-distro disk usage by name so we
+            // don't re-sample it on every poll.
+            for distro in &mut distros {
+                if distro.inner_disk.is_none() {
+                    if let Some(old) = model.distros.iter().find(|d| d.name == distro.name) {
+                        distro.inner_disk = old.inner_disk;
+                    }
+                }
+            }
             model.distros = distros;
             model.loaded = true;
             model.last_error = None;
             model.clamp_selection();
-            vec![]
+            sample_inner_disk_if_needed(model)
         }
         Action::RefreshFailed(message) => {
             model.loaded = true;
@@ -34,6 +44,12 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
         }
         Action::MetricsSampled(sample) => {
             model.metrics.push(&sample);
+            vec![]
+        }
+        Action::InnerDiskSampled { name, inner } => {
+            if let Some(distro) = model.distros.iter_mut().find(|d| d.name == name) {
+                distro.inner_disk = inner;
+            }
             vec![]
         }
         Action::OnlineList(items) => {
@@ -178,6 +194,22 @@ fn load_wslconf(model: &mut Model) -> Vec<Command> {
 
 fn selected_name(model: &Model) -> Option<String> {
     model.selected_distro().map(|distro| distro.name.clone())
+}
+
+/// If the selected distro is running and we have not yet attempted an in-distro
+/// disk sample for it, request one (at most once per distro — no per-poll `df`).
+fn sample_inner_disk_if_needed(model: &mut Model) -> Vec<Command> {
+    let Some((name, running)) = model
+        .selected_distro()
+        .map(|distro| (distro.name.clone(), distro.state == DistroState::Running))
+    else {
+        return vec![];
+    };
+    if !running || model.inner_disk_attempted.contains(&name) {
+        return vec![];
+    }
+    model.inner_disk_attempted.insert(name.clone());
+    vec![Command::SampleInnerDisk(name)]
 }
 
 fn start_selected(model: &mut Model) -> Vec<Command> {
@@ -1078,5 +1110,46 @@ mod tests {
         // Shift+Enter does the other mode (inline).
         let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::SHIFT));
         assert_eq!(cmds, vec![Command::LaunchInlineShell("Debian".into())]);
+    }
+
+    fn running_distro(name: &str) -> Distro {
+        Distro {
+            state: DistroState::Running,
+            ..distro(name)
+        }
+    }
+
+    #[test]
+    fn refreshed_samples_inner_disk_for_running_selected_once_only() {
+        let mut m = Model::default();
+        let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        assert_eq!(cmds, vec![Command::SampleInnerDisk("Debian".into())]);
+        // A second refresh must NOT re-sample (no per-poll df).
+        let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        assert!(cmds.is_empty(), "must not re-sample the same distro");
+    }
+
+    #[test]
+    fn refreshed_does_not_sample_stopped_distro() {
+        let mut m = Model::default();
+        let cmds = update(&mut m, Action::Refreshed(vec![distro("Debian")]));
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn inner_disk_sample_sets_value_and_carries_forward() {
+        let mut m = Model::default();
+        update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        update(
+            &mut m,
+            Action::InnerDiskSampled {
+                name: "Debian".into(),
+                inner: Some((10, 100)),
+            },
+        );
+        assert_eq!(m.distros[0].inner_disk, Some((10, 100)));
+        // A later refresh (fresh list) keeps the cached value.
+        update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        assert_eq!(m.distros[0].inner_disk, Some((10, 100)));
     }
 }

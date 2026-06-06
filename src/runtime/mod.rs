@@ -223,6 +223,12 @@ fn dispatch(
                 let _ = tx.send(Action::MetricsSampled(sample));
             });
         }
+        Command::SampleInnerDisk(name) => {
+            tokio::spawn(async move {
+                let inner = backend.inner_disk(&name).await.ok().flatten();
+                let _ = tx.send(Action::InnerDiskSampled { name, inner });
+            });
+        }
         Command::Lifecycle(op) => {
             tokio::spawn(async move {
                 let action = run_lifecycle(backend.as_ref(), op, lang).await;

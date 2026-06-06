@@ -1,5 +1,7 @@
 //! The application model (state). It grows with each milestone.
 
+use std::collections::HashSet;
+
 use super::modal::Modal;
 use crate::i18n::Lang;
 use crate::metrics::MetricsHistory;
@@ -30,6 +32,9 @@ pub struct Model {
     pub modal: Option<Modal>,
     /// Ring-buffer history of resource samples (drives the sparkline).
     pub metrics: MetricsHistory,
+    /// Distro names we've already attempted an in-distro disk sample for, so we
+    /// fetch it at most once per distro (no per-poll `df`).
+    pub inner_disk_attempted: HashSet<String>,
     /// The current UI language.
     pub lang: Lang,
     /// How navigation keys behave.

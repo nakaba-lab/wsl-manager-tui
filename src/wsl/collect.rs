@@ -55,11 +55,6 @@ pub async fn refresh(backend: &dyn WslBackend) -> Result<Vec<Distro>> {
         if let Some(path) = &distro.vhd_path {
             distro.disk_bytes = crate::metrics::disk_size(path);
         }
-        // Best-effort in-distro filesystem usage (only meaningful when running).
-        if distro.state == DistroState::Running {
-            let inner = backend.inner_disk(&distro.name).await.ok().flatten();
-            distro.inner_disk = inner;
-        }
     }
     Ok(distros)
 }

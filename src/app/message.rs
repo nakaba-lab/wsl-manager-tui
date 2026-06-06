@@ -37,6 +37,13 @@ pub enum Action {
     RefreshFailed(String),
     /// A resource sample was taken.
     MetricsSampled(MetricsSample),
+    /// In-distro filesystem usage `(used, total)` bytes arrived for a distro.
+    InnerDiskSampled {
+        /// The distro the sample is for.
+        name: String,
+        /// The usage, or `None` if it could not be read.
+        inner: Option<(u64, u64)>,
+    },
     /// The list of installable distributions arrived.
     OnlineList(Vec<OnlineDistro>),
     /// A configuration file was loaded for editing.
@@ -62,6 +69,8 @@ pub enum Command {
     RefreshList,
     /// Sample resource usage (VM memory).
     SampleMetrics,
+    /// Sample in-distro filesystem usage for a single (running) distro.
+    SampleInnerDisk(String),
     /// Run a distribution lifecycle operation.
     Lifecycle(LifecycleOp),
     /// Suspend the TUI and run an interactive shell inline (`wsl -d <name>`),
