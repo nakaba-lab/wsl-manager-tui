@@ -7,12 +7,14 @@
 //! these together.
 //!
 //! Layers that must stay UI-independent (no terminal knowledge): [`wsl`],
-//! [`registry`], [`metrics`], [`config`], [`app`], [`i18n`], [`prefs`].
+//! [`registry`], [`metrics`], [`config`], [`app`], [`i18n`], [`prefs`],
+//! [`manage`].
 
 pub mod app;
 pub mod config;
 pub mod error;
 pub mod i18n;
+pub mod manage;
 pub mod metrics;
 pub mod prefs;
 pub mod registry;
