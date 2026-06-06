@@ -90,8 +90,23 @@ async fn event_loop(
                 // Inline shell needs the terminal, so it runs here (not as a
                 // spawned task): suspend the TUI, hand over the console, resume.
                 Command::LaunchInlineShell(name) => {
-                    run_inline_shell(tui, &name, lang).await?;
-                    model.status = Some(tf(lang, Key::StatusReturnedFrom, &[&name]));
+                    // crossterm's `EventStream` keeps a background thread doing a
+                    // *destructive* read (`ReadConsoleInput`) of the shared
+                    // Windows console input buffer for as long as it lives.
+                    // Handing that same console to `wsl.exe` while the reader is
+                    // alive makes the two race for keystrokes — including the
+                    // Ctrl+D used to leave the shell — and leaves the TUI unable
+                    // to receive input on return. Drop the stream first so
+                    // `wsl.exe` owns the console exclusively (its `Drop` stops the
+                    // reader thread and releases the global reader lock), then
+                    // rebuild a clean one *after* `resume()` has re-enabled raw
+                    // mode. The order matters: recreating before resume would
+                    // initialise the reader against a cooked-mode console.
+                    drop(events);
+                    let result = run_inline_shell(tui, &name, lang).await;
+                    events = EventStream::new();
+                    result?;
+                    model.set_status(tf(lang, Key::StatusReturnedFrom, &[&name]));
                     dispatch(Command::RefreshList, &backend, &action_tx, lang);
                 }
                 Command::LaunchTabShell(name) => launch_tab_shell(&name, &action_tx, lang),

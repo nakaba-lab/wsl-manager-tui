@@ -67,7 +67,7 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
             if matches!(model.modal, Some(Modal::Progress(_))) {
                 model.modal = None;
             }
-            model.status = Some(message);
+            model.set_status(message);
             vec![Command::RefreshList]
         }
         Action::OpFailed(message) => {
@@ -89,6 +89,7 @@ fn update_event(model: &mut Model, event: Event) -> Vec<Command> {
             if let Some(Modal::Progress(progress)) = &mut model.modal {
                 progress.tick();
             }
+            model.tick_status();
             vec![]
         }
         Event::Resize(_, _) => vec![],
@@ -96,6 +97,9 @@ fn update_event(model: &mut Model, event: Event) -> Vec<Command> {
 }
 
 fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
+    // Any key press dismisses the last transient status message; the key's own
+    // handler below may immediately set a fresh one.
+    model.clear_status();
     if model.modal.is_some() {
         handle_modal_key(model, key)
     } else if model.filter_mode {
@@ -157,7 +161,7 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         (KeyCode::Char('e'), _) => open_export_form(model),
         (KeyCode::Char('m'), _) => open_import_form(model),
         (KeyCode::Char('i'), _) => {
-            model.status = Some(t(model.lang, Key::StatusFetching).to_string());
+            model.set_status(t(model.lang, Key::StatusFetching).to_string());
             return vec![Command::ListOnline];
         }
         (KeyCode::Char('c'), _) => return load_config(model, ConfigTarget::WslConfig),
@@ -184,7 +188,7 @@ fn open_import_form(model: &mut Model) {
 }
 
 fn load_config(model: &mut Model, target: ConfigTarget) -> Vec<Command> {
-    model.status = Some(tf(model.lang, Key::StatusLoading, &[&target.label()]));
+    model.set_status(tf(model.lang, Key::StatusLoading, &[&target.label()]));
     vec![Command::LoadConfig(target)]
 }
 
@@ -219,7 +223,7 @@ fn start_selected(model: &mut Model) -> Vec<Command> {
     let Some(name) = selected_name(model) else {
         return vec![];
     };
-    model.status = Some(tf(model.lang, Key::StatusStarting, &[&name]));
+    model.set_status(tf(model.lang, Key::StatusStarting, &[&name]));
     vec![Command::Lifecycle(LifecycleOp::Start(name))]
 }
 
@@ -227,7 +231,7 @@ fn set_default_selected(model: &mut Model) -> Vec<Command> {
     let Some(name) = selected_name(model) else {
         return vec![];
     };
-    model.status = Some(tf(model.lang, Key::StatusSettingDefault, &[&name]));
+    model.set_status(tf(model.lang, Key::StatusSettingDefault, &[&name]));
     vec![Command::Lifecycle(LifecycleOp::SetDefault(name))]
 }
 
@@ -242,7 +246,7 @@ fn launch_inline(model: &mut Model) -> Vec<Command> {
     let Some(name) = selected_name(model) else {
         return vec![];
     };
-    model.status = Some(tf(model.lang, Key::StatusLaunchingShell, &[&name]));
+    model.set_status(tf(model.lang, Key::StatusLaunchingShell, &[&name]));
     vec![Command::LaunchInlineShell(name)]
 }
 
@@ -530,6 +534,70 @@ mod tests {
         let cmds = update(&mut m, Action::OpDone("Terminated Debian".into()));
         assert_eq!(cmds, vec![Command::RefreshList]);
         assert_eq!(m.status.as_deref(), Some("Terminated Debian"));
+    }
+
+    #[test]
+    fn status_message_auto_expires_after_ttl() {
+        let mut m = Model::default();
+        update(&mut m, Action::OpDone("Done".into()));
+        assert_eq!(m.status.as_deref(), Some("Done"));
+        // Still shown right up to the last frame before the TTL.
+        for _ in 0..(Model::STATUS_TTL_FRAMES - 1) {
+            update(&mut m, Action::Event(Event::Frame));
+        }
+        assert_eq!(m.status.as_deref(), Some("Done"), "still shown before TTL");
+        // The TTL-th frame expires it (no input needed).
+        update(&mut m, Action::Event(Event::Frame));
+        assert!(m.status.is_none(), "auto-expired after TTL frames");
+    }
+
+    #[test]
+    fn next_key_clears_status_immediately() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, Action::OpDone("Done".into()));
+        assert!(m.status.is_some());
+        // Any key dismisses the message at once (here a navigation key).
+        update(&mut m, key(KeyCode::Down, KeyModifiers::NONE));
+        assert!(m.status.is_none(), "next key clears the status");
+    }
+
+    #[test]
+    fn poll_tick_does_not_clear_status() {
+        // Only Frames count down and only keys clear; a background poll Tick must
+        // not wipe the message out from under the user.
+        let mut m = Model::default();
+        update(&mut m, Action::OpDone("Done".into()));
+        update(&mut m, Action::Event(Event::Tick));
+        assert_eq!(m.status.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn new_status_resets_expiry_countdown() {
+        let mut m = Model::default();
+        update(&mut m, Action::OpDone("First".into()));
+        for _ in 0..20 {
+            update(&mut m, Action::Event(Event::Frame));
+        }
+        update(&mut m, Action::OpDone("Second".into()));
+        assert_eq!(
+            m.status_frames_left,
+            Model::STATUS_TTL_FRAMES,
+            "a fresh status restarts the countdown"
+        );
+    }
+
+    #[test]
+    fn key_that_sets_a_new_status_keeps_it() {
+        // The per-key clear must not wipe a status the same key sets: pressing the
+        // start key clears the old message, then sets its own "starting…".
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, Action::OpDone("Old".into()));
+        update(&mut m, ch('s'));
+        assert!(
+            m.status.is_some(),
+            "the start key sets a fresh status that survives the per-key clear"
+        );
+        assert_ne!(m.status.as_deref(), Some("Old"));
     }
 
     #[test]

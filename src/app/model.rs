@@ -26,8 +26,13 @@ pub struct Model {
     pub filter_mode: bool,
     /// The most recent background error (e.g. a failed refresh).
     pub last_error: Option<String>,
-    /// A transient status message (e.g. the result of an operation).
+    /// A transient status message (e.g. the result of an operation). Auto-expires
+    /// via [`Model::status_frames_left`] and is cleared by the next key press.
     pub status: Option<String>,
+    /// Frames (~120 ms each) the current [`Model::status`] still shows before it
+    /// auto-expires; `0` means no countdown is active. Set by [`Model::set_status`]
+    /// and counted down once per `Event::Frame`.
+    pub status_frames_left: u16,
     /// The active modal overlay, if any.
     pub modal: Option<Modal>,
     /// Ring-buffer history of resource samples (drives the sparkline).
@@ -46,6 +51,35 @@ pub struct Model {
 }
 
 impl Model {
+    /// How long a transient status message stays visible: ~4 s at the runtime's
+    /// 120 ms frame tick.
+    pub const STATUS_TTL_FRAMES: u16 = 33;
+
+    /// Show a transient status message. It auto-expires after
+    /// [`Model::STATUS_TTL_FRAMES`] frames and is also dismissed by the next key
+    /// press (see [`crate::app::update`]).
+    pub fn set_status(&mut self, message: String) {
+        self.status = Some(message);
+        self.status_frames_left = Self::STATUS_TTL_FRAMES;
+    }
+
+    /// Clear the transient status message immediately.
+    pub fn clear_status(&mut self) {
+        self.status = None;
+        self.status_frames_left = 0;
+    }
+
+    /// Count the status message one frame closer to expiry, clearing it once the
+    /// budget runs out. Called once per `Event::Frame`.
+    pub fn tick_status(&mut self) {
+        if self.status_frames_left > 0 {
+            self.status_frames_left -= 1;
+            if self.status_frames_left == 0 {
+                self.status = None;
+            }
+        }
+    }
+
     /// The distributions matching the current filter (all, if no filter).
     pub fn visible_distros(&self) -> Vec<&Distro> {
         if self.filter.is_empty() {
