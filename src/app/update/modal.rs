@@ -82,7 +82,7 @@ fn confirm_action(model: &mut Model, confirm: Confirm) -> Vec<Command> {
         model.modal = Some(Modal::Progress(ProgressState::new(title)));
     }
     if let Some(status) = confirm.status {
-        model.status = Some(status);
+        model.set_status(status);
     }
     confirm.on_confirm
 }
@@ -252,7 +252,7 @@ fn handle_progress_key(model: &mut Model, progress: ProgressState, key: KeyEvent
     match key.code {
         // Cancel: close the dialog and ask the runtime to abort the task.
         KeyCode::Esc => {
-            model.status = Some(t(model.lang, Key::StatusCancelling).to_string());
+            model.set_status(t(model.lang, Key::StatusCancelling).to_string());
             vec![Command::CancelOp]
         }
         _ => {
@@ -312,7 +312,7 @@ fn handle_config_key(model: &mut Model, mut state: ConfigEditState, key: KeyEven
     if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
         let content = state.rendered();
         let target = state.target.clone();
-        model.status = Some(tf(model.lang, Key::StatusSaving, &[&target.label()]));
+        model.set_status(tf(model.lang, Key::StatusSaving, &[&target.label()]));
         return vec![Command::SaveConfig { target, content }];
     }
     match key.code {
