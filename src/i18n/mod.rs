@@ -90,9 +90,6 @@ pub enum Key {
     QuitPrompt,
     // Form field labels.
     LabelExportPath,
-    LabelImportName,
-    LabelImportDir,
-    LabelImportTar,
     LabelImportNameOnly,
     LabelImportCustomArchive,
     // Import picker / managed folder.
@@ -188,9 +185,6 @@ impl Key {
         Key::HelpBody,
         Key::QuitPrompt,
         Key::LabelExportPath,
-        Key::LabelImportName,
-        Key::LabelImportDir,
-        Key::LabelImportTar,
         Key::LabelImportNameOnly,
         Key::LabelImportCustomArchive,
         Key::PickImportTitle,
@@ -315,9 +309,6 @@ fn entry(key: Key) -> (&'static str, &'static str) {
             "wslm を終了しますか？\n\nEnter / y: 終了 · Esc / n: 戻る",
         ),
         Key::LabelExportPath => ("Output file name", "出力ファイル名"),
-        Key::LabelImportName => ("New distro name", "新しいディストロ名"),
-        Key::LabelImportDir => ("Install directory", "インストール先ディレクトリ"),
-        Key::LabelImportTar => ("Source .tar path", "元 .tar パス"),
         Key::LabelImportNameOnly => ("New distro name", "新しいディストロ名"),
         Key::LabelImportCustomArchive => ("Source archive path", "元アーカイブのパス"),
         Key::PickImportTitle => (
@@ -409,8 +400,8 @@ const HELP_EN: &str = "\
  X             shut down the whole WSL VM
  d             set as default
  u             unregister — delete (type name to confirm)
- e             export to a .tar backup
- m             import from a .tar
+ e             export to the managed folder
+ m             import (pick from the managed folder)
  i             install from the online catalog
  c / C         edit .wslconfig / wsl.conf
  L             toggle English / Japanese
@@ -430,8 +421,8 @@ const HELP_JA: &str = "\
  X             WSL VM 全体を停止
  d             既定に設定
  u             登録解除 — 削除 (名前入力で確認)
- e             .tar にエクスポート
- m             .tar からインポート
+ e             管理フォルダにエクスポート
+ m             インポート（管理フォルダから選択）
  i             オンライン一覧からインストール
  c / C         .wslconfig / wsl.conf を編集
  L             英語 / 日本語 切替

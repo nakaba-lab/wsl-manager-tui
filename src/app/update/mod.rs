@@ -980,4 +980,28 @@ mod tests {
         update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
         assert_eq!(m.distros[0].inner_disk, Some((10, 100)));
     }
+
+    #[test]
+    fn custom_import_submit_uses_typed_path_and_managed_dir() {
+        let mut m = open_picker(&["a.tar"]);
+        update(&mut m, ch('c')); // open custom form: field 0 = archive path, field 1 = name
+        for c in r"D:\dl\thing.tar.gz".chars() {
+            update(&mut m, ch(c));
+        }
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "Imported".chars() {
+            update(&mut m, ch(c));
+        }
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            cmds,
+            vec![Command::Import {
+                name: "Imported".into(),
+                dir: std::path::PathBuf::from(r"C:\wsl\installed\Imported"),
+                tar: std::path::PathBuf::from(r"D:\dl\thing.tar.gz"),
+                vhd: false,
+            }]
+        );
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
+    }
 }

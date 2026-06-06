@@ -29,8 +29,14 @@ configuration — all from a single screen.
   and unregister (with a type-the-name confirmation).
 - **Shells**: open a shell inline (the TUI suspends and resumes on exit) or in
   a new Windows Terminal tab.
-- **Transfer**: export to / import from a `.tar`, and install new distros from
-  the online catalog — long operations show a cancellable progress dialog.
+- **Managed export/import**: `e` exports the selected distro into
+  `%USERPROFILE%\wsl-manager\exports\` (the file extension selects the format:
+  `.tar`, `.tar.gz`, `.tar.xz`, or `.vhdx`); `m` opens a picker over that
+  folder — press `c` for a custom archive path or `d` to delete an entry.
+  Imported distros are stored under `installed\<name>\` inside the same managed
+  root (configurable via `manage_dir` in `config.toml`). Long operations show a
+  cancellable progress dialog. Install new distros from the online catalog with
+  `i`.
 - **Resource monitor**: WSL VM memory with a live sparkline (the WSL2 VM is
   shared by all distros).
 - **Config editor**: edit `.wslconfig` and a distro's `wsl.conf` with a
@@ -52,8 +58,8 @@ configuration — all from a single screen.
 | `X` | Shut down the whole WSL VM |
 | `d` | Set as default |
 | `u` | Unregister — delete (type the name to confirm) |
-| `e` | Export to a `.tar` backup |
-| `m` | Import from a `.tar` |
+| `e` | Export to the managed folder (extension selects format) |
+| `m` | Import — pick from the managed folder (`c` custom path, `d` delete) |
 | `i` | Install from the online catalog |
 | `c` / `C` | Edit `.wslconfig` / `wsl.conf` |
 | `L` | Toggle English / Japanese |
