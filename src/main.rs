@@ -3,8 +3,11 @@
 //! Kept intentionally thin: it installs error/panic handling and hands off to
 //! the library runtime. The real logic lives in the `wsl_manager_tui` crate.
 
-fn main() -> color_eyre::Result<()> {
+use wsl_manager_tui::runtime;
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-    // The interactive runtime is wired up in milestone M1.
-    Ok(())
+    runtime::install_panic_hook();
+    runtime::run().await
 }
