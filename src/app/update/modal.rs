@@ -125,12 +125,22 @@ fn handle_import_pick_key(
 ) -> Vec<Command> {
     match key.code {
         KeyCode::Esc => vec![], // cancelled (modal already taken)
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down if model.keybind_style.arrows_enabled() => {
             pick.select_next();
             model.modal = Some(Modal::ImportPick(pick));
             vec![]
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Char('j') if model.keybind_style.vim_enabled() => {
+            pick.select_next();
+            model.modal = Some(Modal::ImportPick(pick));
+            vec![]
+        }
+        KeyCode::Up if model.keybind_style.arrows_enabled() => {
+            pick.select_prev();
+            model.modal = Some(Modal::ImportPick(pick));
+            vec![]
+        }
+        KeyCode::Char('k') if model.keybind_style.vim_enabled() => {
             pick.select_prev();
             model.modal = Some(Modal::ImportPick(pick));
             vec![]

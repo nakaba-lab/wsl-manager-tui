@@ -982,6 +982,21 @@ mod tests {
     }
 
     #[test]
+    fn picker_navigation_moves_selection() {
+        let mut m = open_picker(&["a.tar", "b.tar"]);
+        update(&mut m, key(KeyCode::Down, KeyModifiers::NONE));
+        match &m.modal {
+            Some(Modal::ImportPick(p)) => assert_eq!(p.selected, 1),
+            other => panic!("expected picker, got {other:?}"),
+        }
+        update(&mut m, ch('k'));
+        match &m.modal {
+            Some(Modal::ImportPick(p)) => assert_eq!(p.selected, 0),
+            other => panic!("expected picker, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn custom_import_submit_uses_typed_path_and_managed_dir() {
         let mut m = open_picker(&["a.tar"]);
         update(&mut m, ch('c')); // open custom form: field 0 = archive path, field 1 = name

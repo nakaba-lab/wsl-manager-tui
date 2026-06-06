@@ -100,22 +100,17 @@ impl WslBackend for RealWslBackend {
 
     async fn export(&self, name: &str, path: &Path, format: ExportFormat) -> Result<()> {
         let path = path.to_string_lossy();
-        let mut args = vec!["--export", name, path.as_ref()];
-        if let Some(fmt) = format.wsl_format_arg() {
-            args.push("--format");
-            args.push(fmt);
-        }
-        run_wsl_long(&args).await.map(drop)
+        run_wsl_long(&export_args(name, path.as_ref(), format))
+            .await
+            .map(drop)
     }
 
     async fn import(&self, name: &str, dir: &Path, tar: &Path, vhd: bool) -> Result<()> {
         let dir = dir.to_string_lossy();
         let tar = tar.to_string_lossy();
-        let mut args = vec!["--import", name, dir.as_ref(), tar.as_ref()];
-        if vhd {
-            args.push("--vhd");
-        }
-        run_wsl_long(&args).await.map(drop)
+        run_wsl_long(&import_args(name, dir.as_ref(), tar.as_ref(), vhd))
+            .await
+            .map(drop)
     }
 
     async fn install(&self, name: &str) -> Result<()> {
@@ -192,6 +187,23 @@ impl WslBackend for RealWslBackend {
     }
 }
 
+fn export_args<'a>(name: &'a str, path: &'a str, format: ExportFormat) -> Vec<&'a str> {
+    let mut args = vec!["--export", name, path];
+    if let Some(fmt) = format.wsl_format_arg() {
+        args.push("--format");
+        args.push(fmt);
+    }
+    args
+}
+
+fn import_args<'a>(name: &'a str, dir: &'a str, tar: &'a str, vhd: bool) -> Vec<&'a str> {
+    let mut args = vec!["--import", name, dir, tar];
+    if vhd {
+        args.push("--vhd");
+    }
+    args
+}
+
 /// Run `wsl.exe` with the given arguments and return its decoded stdout. On a
 /// non-zero exit, the decoded stderr is carried in the error for display.
 async fn run_wsl(args: &[&str]) -> Result<String> {
@@ -217,5 +229,50 @@ async fn run_wsl_inner(args: &[&str], kill_on_drop: bool) -> Result<String> {
             args: args.iter().map(|s| (*s).to_string()).collect(),
             message: decode_wsl_output(&output.stderr).trim().to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_args_tar_omits_format() {
+        assert_eq!(
+            export_args("Debian", "p.tar", ExportFormat::Tar),
+            ["--export", "Debian", "p.tar"]
+        );
+    }
+
+    #[test]
+    fn export_args_targz_adds_format() {
+        assert_eq!(
+            export_args("Debian", "p.tar.gz", ExportFormat::TarGz),
+            ["--export", "Debian", "p.tar.gz", "--format", "tar.gz"]
+        );
+    }
+
+    #[test]
+    fn export_args_vhd_uses_format_vhd() {
+        assert_eq!(
+            export_args("Debian", "p.vhdx", ExportFormat::Vhd),
+            ["--export", "Debian", "p.vhdx", "--format", "vhd"]
+        );
+    }
+
+    #[test]
+    fn import_args_tar_has_no_flag() {
+        assert_eq!(
+            import_args("D", "dir", "t.tar.gz", false),
+            ["--import", "D", "dir", "t.tar.gz"]
+        );
+    }
+
+    #[test]
+    fn import_args_vhd_adds_flag() {
+        assert_eq!(
+            import_args("D", "dir", "t.vhdx", true),
+            ["--import", "D", "dir", "t.vhdx", "--vhd"]
+        );
     }
 }
