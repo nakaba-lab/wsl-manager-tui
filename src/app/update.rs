@@ -25,6 +25,10 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
             model.last_error = Some(message);
             vec![]
         }
+        Action::MetricsSampled(sample) => {
+            model.metrics.push(&sample);
+            vec![]
+        }
         Action::OpDone(message) => {
             model.status = Some(message);
             vec![Command::RefreshList]
@@ -42,7 +46,7 @@ fn update_event(model: &mut Model, event: Event) -> Vec<Command> {
         Event::Key(key) => handle_key(model, key),
         Event::Tick => {
             model.ticks = model.ticks.wrapping_add(1);
-            vec![Command::RefreshList]
+            vec![Command::RefreshList, Command::SampleMetrics]
         }
         Event::Resize(_, _) => vec![],
     }
@@ -257,11 +261,27 @@ mod tests {
     }
 
     #[test]
-    fn tick_polls_refresh() {
+    fn tick_polls_refresh_and_metrics() {
         let mut m = Model::default();
         let cmds = update(&mut m, Action::Event(Event::Tick));
-        assert_eq!(cmds, vec![Command::RefreshList]);
+        assert!(cmds.contains(&Command::RefreshList));
+        assert!(cmds.contains(&Command::SampleMetrics));
         assert_eq!(m.ticks, 1);
+    }
+
+    #[test]
+    fn metrics_sampled_updates_history() {
+        use crate::metrics::MetricsSample;
+        let mut m = Model::default();
+        update(
+            &mut m,
+            Action::MetricsSampled(MetricsSample {
+                vmmem_bytes: Some(123),
+                total_mem_bytes: 456,
+            }),
+        );
+        assert_eq!(m.metrics.latest_vmmem, Some(123));
+        assert_eq!(m.metrics.total_mem_bytes, 456);
     }
 
     #[test]

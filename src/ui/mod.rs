@@ -4,20 +4,85 @@
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, Paragraph, Row, Sparkline, Table, TableState, Wrap,
+};
 use ratatui::Frame;
 
 use crate::app::{Confirm, Modal, Model};
+use crate::metrics::MetricsHistory;
 use crate::wsl::{Distro, DistroState};
 
 /// Render the whole UI for the current model.
 pub fn view(f: &mut Frame, model: &Model) {
     let area = f.area();
-    let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(area);
+    let chunks = Layout::vertical([
+        Constraint::Min(5),
+        Constraint::Length(8),
+        Constraint::Length(1),
+    ])
+    .split(area);
     render_table(f, model, chunks[0]);
-    render_status(f, model, chunks[1]);
+    render_detail(f, model, chunks[1]);
+    render_status(f, model, chunks[2]);
     if let Some(modal) = &model.modal {
         render_modal(f, modal, area);
+    }
+}
+
+fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
+    let title = match model.selected_distro() {
+        Some(distro) => format!(" Detail: {} ", distro.name),
+        None => " Detail ".to_string(),
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let Some(distro) = model.selected_distro() else {
+        f.render_widget(Paragraph::new("No distributions."), inner);
+        return;
+    };
+
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+
+    let path = distro
+        .base_path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "—".to_string());
+    let disk = distro
+        .disk_bytes
+        .map(human_size)
+        .unwrap_or_else(|| "—".to_string());
+    let default = if distro.is_default { "yes" } else { "no" };
+    let info = format!(
+        "State:   {}\nVersion: {}    Default: {}\nDisk:    {}\nPath:    {}\nVM Mem:  {}",
+        state_label(distro.state),
+        distro.version,
+        default,
+        disk,
+        path,
+        vm_mem_line(&model.metrics),
+    );
+    f.render_widget(Paragraph::new(info), rows[0]);
+
+    let data = model.metrics.sparkline();
+    let sparkline = Sparkline::default()
+        .data(data.as_slice())
+        .style(Style::default().fg(Color::Cyan));
+    f.render_widget(sparkline, rows[1]);
+}
+
+fn vm_mem_line(metrics: &MetricsHistory) -> String {
+    match metrics.latest_vmmem {
+        Some(used) if metrics.total_mem_bytes > 0 => format!(
+            "{} / {} (vmmemWSL, shared by all distros)",
+            human_size(used),
+            human_size(metrics.total_mem_bytes)
+        ),
+        Some(used) => format!("{} (vmmemWSL, shared by all distros)", human_size(used)),
+        None => "— (WSL VM not running)".to_string(),
     }
 }
 
@@ -213,7 +278,7 @@ mod tests {
 
     #[test]
     fn renders_title_and_distro() {
-        let rendered = render(&sample(), 110, 10);
+        let rendered = render(&sample(), 110, 24);
         assert!(rendered.contains("WSL Manager"), "title missing");
         assert!(rendered.contains("Debian"), "distro name missing");
         assert!(rendered.contains("Running"), "state missing");
@@ -231,10 +296,24 @@ mod tests {
                 input: "Deb".to_string(),
             }),
         }));
-        let rendered = render(&model, 110, 16);
+        let rendered = render(&model, 110, 24);
         assert!(rendered.contains("Confirm"), "confirm title missing");
         assert!(rendered.contains("PERMANENTLY"), "prompt missing");
         assert!(rendered.contains("type"), "typed hint missing");
+    }
+
+    #[test]
+    fn renders_detail_pane_with_vm_memory() {
+        use crate::metrics::MetricsSample;
+        let mut model = sample();
+        model.metrics.push(&MetricsSample {
+            vmmem_bytes: Some(2 * 1024 * 1024 * 1024),
+            total_mem_bytes: 8 * 1024 * 1024 * 1024,
+        });
+        let rendered = render(&model, 110, 24);
+        assert!(rendered.contains("Detail: Debian"), "detail title missing");
+        assert!(rendered.contains("VM Mem"), "vm memory line missing");
+        assert!(rendered.contains("2.0 GB"), "vm memory value missing");
     }
 
     #[test]

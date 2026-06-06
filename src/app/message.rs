@@ -6,6 +6,7 @@
 
 use crossterm::event::KeyEvent;
 
+use crate::metrics::MetricsSample;
 use crate::wsl::Distro;
 
 /// Low-level input delivered by the runtime to the application.
@@ -29,6 +30,8 @@ pub enum Action {
     Refreshed(Vec<Distro>),
     /// A refresh attempt failed; carries a human-readable message.
     RefreshFailed(String),
+    /// A resource sample was taken.
+    MetricsSampled(MetricsSample),
     /// A lifecycle operation finished successfully (carries a status message).
     OpDone(String),
     /// A lifecycle operation failed (carries an error message).
@@ -43,6 +46,8 @@ pub enum Action {
 pub enum Command {
     /// Re-read the distro list (plus registry and disk metadata).
     RefreshList,
+    /// Sample resource usage (VM memory).
+    SampleMetrics,
     /// Run a distribution lifecycle operation.
     Lifecycle(LifecycleOp),
     /// Suspend the TUI and run an interactive shell inline (`wsl -d <name>`),

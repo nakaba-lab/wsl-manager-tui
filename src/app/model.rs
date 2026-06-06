@@ -1,6 +1,7 @@
 //! The application model (state). It grows with each milestone.
 
 use super::modal::Modal;
+use crate::metrics::MetricsHistory;
 use crate::wsl::Distro;
 
 /// The full application state. Rendered by [`crate::ui`] and mutated only by
@@ -21,6 +22,8 @@ pub struct Model {
     pub status: Option<String>,
     /// The active modal overlay, if any.
     pub modal: Option<Modal>,
+    /// Ring-buffer history of resource samples (drives the sparkline).
+    pub metrics: MetricsHistory,
     /// False until the first refresh completes (drives a "loading" hint).
     pub loaded: bool,
 }

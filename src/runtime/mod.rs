@@ -19,6 +19,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::app::{update, Action, Command, Event, LifecycleOp, Model};
+use crate::metrics;
 use crate::ui;
 use crate::wsl::{self, RealWslBackend, WslBackend};
 
@@ -42,8 +43,9 @@ async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBacken
     let mut tick = tokio::time::interval(TICK);
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
 
-    // Kick off the initial load immediately.
+    // Kick off the initial load and metrics sample immediately.
     dispatch(Command::RefreshList, &backend, &action_tx);
+    dispatch(Command::SampleMetrics, &backend, &action_tx);
 
     loop {
         tui.draw(|f| ui::view(f, model))?;
@@ -133,6 +135,14 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                     Err(error) => Action::RefreshFailed(error.to_string()),
                 };
                 let _ = tx.send(action);
+            });
+        }
+        Command::SampleMetrics => {
+            tokio::spawn(async move {
+                let sample = tokio::task::spawn_blocking(metrics::sample)
+                    .await
+                    .unwrap_or_default();
+                let _ = tx.send(Action::MetricsSampled(sample));
             });
         }
         Command::Lifecycle(op) => {
