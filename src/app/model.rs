@@ -1,6 +1,7 @@
 //! The application model (state). It grows with each milestone.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use super::modal::Modal;
 use crate::i18n::Lang;
@@ -43,6 +44,8 @@ pub struct Model {
     pub default_shell_launch: ShellLaunch,
     /// False until the first refresh completes (drives a "loading" hint).
     pub loaded: bool,
+    /// Root of the managed export/import folder (resolved from prefs at startup).
+    pub manage_dir: PathBuf,
 }
 
 impl Model {

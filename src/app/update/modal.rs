@@ -16,6 +16,7 @@ pub(super) fn handle_modal_key(model: &mut Model, key: KeyEvent) -> Vec<Command>
         Modal::Form(form) => handle_form_key(model, form, key),
         Modal::Progress(progress) => handle_progress_key(model, progress, key),
         Modal::InstallPick(pick) => handle_install_key(model, pick, key),
+        Modal::ImportPick(pick) => handle_import_pick_key(model, pick, key),
         Modal::ConfigEdit(state) => handle_config_key(model, state, key),
         // Any key dismisses help (the modal was already taken above).
         Modal::Help => vec![],
@@ -117,54 +118,124 @@ fn handle_form_key(model: &mut Model, mut form: FormState, key: KeyEvent) -> Vec
     }
 }
 
+fn handle_import_pick_key(
+    model: &mut Model,
+    mut pick: ImportPickState,
+    key: KeyEvent,
+) -> Vec<Command> {
+    match key.code {
+        KeyCode::Esc => vec![], // cancelled (modal already taken)
+        KeyCode::Down | KeyCode::Char('j') => {
+            pick.select_next();
+            model.modal = Some(Modal::ImportPick(pick));
+            vec![]
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            pick.select_prev();
+            model.modal = Some(Modal::ImportPick(pick));
+            vec![]
+        }
+        KeyCode::Enter => {
+            if let Some(entry) = pick.selected_entry() {
+                let tar = entry.path.clone();
+                let default_name = crate::manage::derive_distro_name(&entry.name);
+                model.modal = Some(Modal::Form(FormState::import_name(tar, default_name)));
+            } else {
+                model.modal = Some(Modal::ImportPick(pick));
+            }
+            vec![]
+        }
+        KeyCode::Char('c') => {
+            model.modal = Some(Modal::Form(FormState::import_custom()));
+            vec![]
+        }
+        KeyCode::Char('d') => {
+            if let Some(entry) = pick.selected_entry() {
+                let prompt = tf(model.lang, Key::PromptDeleteArchive, &[&entry.name]);
+                let path = entry.path.clone();
+                model.modal = Some(Modal::Confirm(Confirm {
+                    prompt,
+                    require_typed: None,
+                    on_confirm: vec![Command::DeleteExport(path)],
+                    progress_title: None,
+                    status: None,
+                }));
+            } else {
+                model.modal = Some(Modal::ImportPick(pick));
+            }
+            vec![]
+        }
+        _ => {
+            model.modal = Some(Modal::ImportPick(pick));
+            vec![]
+        }
+    }
+}
+
 fn submit_form(model: &mut Model, form: FormState) -> Vec<Command> {
     match form.kind.clone() {
         FormKind::Export { distro } => {
-            let path = form.value(0).trim().to_string();
-            if path.is_empty() {
+            let filename = form.value(0).trim().to_string();
+            if filename.is_empty() {
                 model.modal = Some(Modal::Form(form));
                 return vec![];
             }
+            let path = crate::manage::exports_dir(&model.manage_dir).join(&filename);
+            let format = crate::manage::ExportFormat::from_filename(&filename);
             let title = tf(model.lang, Key::ProgExporting, &[&distro]);
             model.modal = Some(Modal::Progress(ProgressState::new(title)));
             vec![Command::Export {
                 name: distro,
-                path: PathBuf::from(path),
+                path,
+                format,
             }]
         }
-        FormKind::Import => {
+        FormKind::ImportName { tar } => {
             let name = form.value(0).trim().to_string();
-            let dir = form.value(1).trim().to_string();
-            let tar = form.value(2).trim().to_string();
-            if name.is_empty() || dir.is_empty() || tar.is_empty() {
+            if name.is_empty() {
                 model.modal = Some(Modal::Form(form));
                 return vec![];
             }
-            let title = tf(model.lang, Key::ProgImporting, &[&name]);
-            let import = Command::Import {
-                name: name.clone(),
-                dir: PathBuf::from(dir),
-                tar: PathBuf::from(tar),
-            };
-            // If a distro with this name already exists, confirm the overwrite.
-            if model
-                .distros
-                .iter()
-                .any(|distro| distro.name.eq_ignore_ascii_case(&name))
-            {
-                model.modal = Some(Modal::Confirm(Confirm {
-                    prompt: tf(model.lang, Key::PromptImportOverwrite, &[&name]),
-                    require_typed: None,
-                    on_confirm: vec![import],
-                    progress_title: Some(title),
-                    status: None,
-                }));
+            submit_import(model, name, tar)
+        }
+        FormKind::ImportCustom => {
+            let tar = form.value(0).trim().to_string();
+            let name = form.value(1).trim().to_string();
+            if tar.is_empty() || name.is_empty() {
+                model.modal = Some(Modal::Form(form));
                 return vec![];
             }
-            model.modal = Some(Modal::Progress(ProgressState::new(title)));
-            vec![import]
+            submit_import(model, name, PathBuf::from(tar))
         }
     }
+}
+
+fn submit_import(model: &mut Model, name: String, tar: PathBuf) -> Vec<Command> {
+    let dir = crate::manage::installed_dir(&model.manage_dir, &name);
+    let vhd = crate::manage::is_vhd_archive(&tar.to_string_lossy());
+    let title = tf(model.lang, Key::ProgImporting, &[&name]);
+    let import = Command::Import {
+        name: name.clone(),
+        dir,
+        tar,
+        vhd,
+    };
+    if model
+        .distros
+        .iter()
+        .any(|distro| distro.name.eq_ignore_ascii_case(&name))
+    {
+        model.modal = Some(Modal::Confirm(Confirm {
+            prompt: tf(model.lang, Key::PromptImportOverwrite, &[&name]),
+            require_typed: None,
+            on_confirm: vec![import],
+            progress_title: Some(title),
+            status: None,
+        }));
+        return vec![];
+    }
+    model.modal = Some(Modal::Progress(ProgressState::new(title)));
+    vec![import]
 }
 
 fn handle_progress_key(model: &mut Model, progress: ProgressState, key: KeyEvent) -> Vec<Command> {

@@ -12,7 +12,8 @@ pub mod update;
 pub use config_edit::{ConfigEditState, ConfigField, EditMode, RawEditor};
 pub use message::{Action, Command, Event, LifecycleOp};
 pub use modal::{
-    Confirm, FormKind, FormState, InstallPickState, Modal, ProgressState, TextField, TypedConfirm,
+    Confirm, FormKind, FormState, ImportPickState, InstallPickState, Modal, ProgressState,
+    TextField, TypedConfirm,
 };
 pub use model::Model;
 pub use update::update;

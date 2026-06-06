@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
 use crate::error::{Result, WslError};
+use crate::manage::ExportFormat;
 use crate::wsl::decode::{decode_utf8, decode_wsl_output};
 use crate::wsl::model::OnlineDistro;
 use crate::wsl::parse::{parse_df, parse_list_online, parse_list_verbose, RawDistroRow};
@@ -32,10 +33,10 @@ pub trait WslBackend: Send + Sync {
     async fn unregister(&self, name: &str) -> Result<()>;
     /// List installable distributions (`wsl --list --online`).
     async fn list_online(&self) -> Result<Vec<OnlineDistro>>;
-    /// Export a distro to a tar file (`wsl --export <name> <path>`).
-    async fn export(&self, name: &str, path: &Path) -> Result<()>;
-    /// Import a distro from a tar file (`wsl --import <name> <dir> <tar>`).
-    async fn import(&self, name: &str, dir: &Path, tar: &Path) -> Result<()>;
+    /// Export a distro (`wsl --export <name> <path> [--format <fmt>]`).
+    async fn export(&self, name: &str, path: &Path, format: ExportFormat) -> Result<()>;
+    /// Import a distro (`wsl --import <name> <dir> <tar> [--vhd]`).
+    async fn import(&self, name: &str, dir: &Path, tar: &Path, vhd: bool) -> Result<()>;
     /// Install a distro (`wsl --install -d <name> --no-launch`).
     async fn install(&self, name: &str) -> Result<()>;
     /// In-distro root filesystem usage as `(used, total)` bytes (`df -kP /`).
@@ -97,19 +98,24 @@ impl WslBackend for RealWslBackend {
         Ok(parse_list_online(&text))
     }
 
-    async fn export(&self, name: &str, path: &Path) -> Result<()> {
+    async fn export(&self, name: &str, path: &Path, format: ExportFormat) -> Result<()> {
         let path = path.to_string_lossy();
-        run_wsl_long(&["--export", name, path.as_ref()])
-            .await
-            .map(drop)
+        let mut args = vec!["--export", name, path.as_ref()];
+        if let Some(fmt) = format.wsl_format_arg() {
+            args.push("--format");
+            args.push(fmt);
+        }
+        run_wsl_long(&args).await.map(drop)
     }
 
-    async fn import(&self, name: &str, dir: &Path, tar: &Path) -> Result<()> {
+    async fn import(&self, name: &str, dir: &Path, tar: &Path, vhd: bool) -> Result<()> {
         let dir = dir.to_string_lossy();
         let tar = tar.to_string_lossy();
-        run_wsl_long(&["--import", name, dir.as_ref(), tar.as_ref()])
-            .await
-            .map(drop)
+        let mut args = vec!["--import", name, dir.as_ref(), tar.as_ref()];
+        if vhd {
+            args.push("--vhd");
+        }
+        run_wsl_long(&args).await.map(drop)
     }
 
     async fn install(&self, name: &str) -> Result<()> {
