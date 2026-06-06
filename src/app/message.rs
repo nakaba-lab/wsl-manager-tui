@@ -1,10 +1,12 @@
 //! Core message types for the MVU loop.
 //!
 //! [`Event`] is what the runtime feeds in (terminal input + timer ticks).
-//! [`Action`] is what the [`crate::app::update`] reducer consumes. Side-effecting
-//! `Command`s returned by `update` are introduced in later milestones (M2+).
+//! [`Action`] is what the [`crate::app::update`] reducer consumes. [`Command`]s
+//! returned by `update` describe side effects the runtime then executes.
 
 use crossterm::event::KeyEvent;
+
+use crate::wsl::Distro;
 
 /// Low-level input delivered by the runtime to the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +25,18 @@ pub enum Event {
 pub enum Action {
     /// An input event produced by the runtime.
     Event(Event),
+    /// The distro list was refreshed successfully.
+    Refreshed(Vec<Distro>),
+    /// A refresh attempt failed; carries a human-readable message.
+    RefreshFailed(String),
     /// Request to quit the application.
     Quit,
+}
+
+/// A side effect requested by [`crate::app::update`] and executed by the
+/// runtime as an async task; its result comes back as an [`Action`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// Re-read the distro list (plus registry and disk metadata).
+    RefreshList,
 }

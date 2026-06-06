@@ -6,6 +6,6 @@ pub mod message;
 pub mod model;
 pub mod update;
 
-pub use message::{Action, Event};
+pub use message::{Action, Command, Event};
 pub use model::Model;
 pub use update::update;

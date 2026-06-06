@@ -1,0 +1,78 @@
+//! Decoding of `wsl.exe` output.
+//!
+//! The wsl CLI emits its own messages as UTF-16LE (usually with a BOM). By
+//! contrast, in-distro command output (`wsl -d <name> -- ...`) is the Linux
+//! side's UTF-8 and must be decoded with [`decode_utf8`].
+
+/// Decode `wsl.exe` meta output. Handles an optional UTF-16LE BOM. If the bytes
+/// do not look like UTF-16 (no BOM and no interior NUL bytes) they are treated
+/// as UTF-8, so the function is robust across environments.
+pub fn decode_wsl_output(bytes: &[u8]) -> String {
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return decode_utf16le(rest);
+    }
+    // Heuristic: UTF-16LE ASCII text has a NUL as every second byte.
+    let looks_utf16 = bytes.len() >= 2 && bytes.iter().skip(1).step_by(2).take(8).any(|&b| b == 0);
+    if looks_utf16 {
+        decode_utf16le(bytes)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
+/// Decode raw UTF-8 bytes (used for in-distro command output).
+pub fn decode_utf8(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn decode_utf16le(bytes: &[u8]) -> String {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn utf16le_with_bom(s: &str) -> Vec<u8> {
+        let mut v = vec![0xFF, 0xFE];
+        for u in s.encode_utf16() {
+            v.extend_from_slice(&u.to_le_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn decodes_utf16le_with_bom() {
+        let bytes = utf16le_with_bom("  NAME  STATE\r\n* Debian  Running  2\r\n");
+        let s = decode_wsl_output(&bytes);
+        assert!(s.contains("Debian"));
+        assert!(s.contains("NAME"));
+    }
+
+    #[test]
+    fn decodes_utf16le_without_bom() {
+        let mut bytes = Vec::new();
+        for u in "Ubuntu".encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        assert_eq!(decode_wsl_output(&bytes), "Ubuntu");
+    }
+
+    #[test]
+    fn falls_back_to_utf8() {
+        assert_eq!(decode_wsl_output(b"plain ascii"), "plain ascii");
+    }
+
+    #[test]
+    fn decodes_localized_state() {
+        // Japanese (localized) state strings must still decode cleanly.
+        let bytes = utf16le_with_bom("  名前  状態  バージョン\r\n* Debian  実行中  2\r\n");
+        let s = decode_wsl_output(&bytes);
+        assert!(s.contains("実行中"));
+        assert!(s.contains("Debian"));
+    }
+}
