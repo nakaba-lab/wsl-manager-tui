@@ -110,7 +110,8 @@ fn render_table(f: &mut Frame, model: &Model, area: Rect) {
         t(lang, Key::ColDisk),
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
-    let rows = model.distros.iter().map(|distro| distro_row(lang, distro));
+    let visible = model.visible_distros();
+    let rows = visible.iter().map(|&distro| distro_row(lang, distro));
     let widths = [
         Constraint::Min(16),
         Constraint::Length(12),
@@ -129,8 +130,8 @@ fn render_table(f: &mut Frame, model: &Model, area: Rect) {
         .highlight_symbol("▶ ");
 
     let mut state = TableState::default();
-    if !model.distros.is_empty() {
-        state.select(Some(model.selected));
+    if !visible.is_empty() {
+        state.select(Some(model.selected.min(visible.len() - 1)));
     }
     f.render_stateful_widget(table, area, &mut state);
 }
@@ -169,7 +170,18 @@ fn state_label(lang: Lang, state: DistroState) -> &'static str {
 
 fn render_status(f: &mut Frame, model: &Model, area: Rect) {
     let lang = model.lang;
-    let (text, style) = if let Some(error) = &model.last_error {
+    if model.filter_mode {
+        let prompt = format!("/{}▏", model.filter);
+        let widget = Paragraph::new(prompt).style(Style::default().fg(Color::Yellow));
+        f.render_widget(widget, area);
+        return;
+    }
+    let (text, style) = if !model.filter.is_empty() {
+        (
+            format!("filter: {} · Esc clears", model.filter),
+            Style::default().fg(Color::Yellow),
+        )
+    } else if let Some(error) = &model.last_error {
         (
             format!("{}: {error}", t(lang, Key::ErrorPrefix)),
             Style::default().fg(Color::Red),
@@ -195,7 +207,51 @@ fn render_modal(f: &mut Frame, modal: &Modal, lang: Lang, area: Rect) {
         Modal::Progress(progress) => render_progress(f, progress, lang, area),
         Modal::InstallPick(pick) => render_install_pick(f, pick, lang, area),
         Modal::ConfigEdit(state) => render_config_edit(f, state, lang, area),
+        Modal::Help => render_help(f, area),
+        Modal::Quit => render_quit(f, area),
     }
+}
+
+fn render_help(f: &mut Frame, area: Rect) {
+    let popup = centered_rect(66, 24, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Help — keybindings ");
+    let text = "\
+ j/k · ↑/↓     move selection
+ /             filter list (Esc clears)
+ Enter         inline shell (exit returns to wslm)
+ w             shell in a new Windows Terminal tab
+ s             start (boot) the distro
+ x             stop (terminate) the distro
+ X             shut down the whole WSL VM
+ d             set as default
+ u             unregister — delete (type name to confirm)
+ e             export to a .tar backup
+ m             import from a .tar
+ i             install from the online catalog
+ c / C         edit .wslconfig / wsl.conf
+ L             toggle English / Japanese
+ r             refresh now
+ ?             this help
+ q             quit  (Ctrl+C forces quit)
+
+ Press any key to close.";
+    f.render_widget(Paragraph::new(text).block(block), popup);
+}
+
+fn render_quit(f: &mut Frame, area: Rect) {
+    let popup = centered_rect(44, 5, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Quit ")
+        .border_style(Style::default().fg(Color::Yellow));
+    f.render_widget(
+        Paragraph::new("Quit wslm?\n\nEnter / y: quit · Esc / n: stay").block(block),
+        popup,
+    );
 }
 
 fn render_config_edit(f: &mut Frame, state: &ConfigEditState, lang: Lang, area: Rect) {
@@ -551,9 +607,44 @@ mod tests {
     }
 
     #[test]
+    fn renders_help_overlay() {
+        let mut model = sample();
+        model.modal = Some(Modal::Help);
+        let rendered = render(&model, 90, 30);
+        assert!(rendered.contains("Help"), "help title missing");
+        assert!(rendered.contains("quit"), "keybinding text missing");
+    }
+
+    #[test]
+    fn table_shows_only_filtered_rows() {
+        let model = Model {
+            distros: vec![distro_named("Debian"), distro_named("Ubuntu")],
+            filter: "ubu".to_string(),
+            loaded: true,
+            ..Default::default()
+        };
+        let rendered = render(&model, 90, 24);
+        assert!(rendered.contains("Ubuntu"), "matching row missing");
+        assert!(!rendered.contains("Debian"), "filtered-out row present");
+    }
+
+    #[test]
     fn human_size_formats() {
         assert_eq!(human_size(512), "512 B");
         assert_eq!(human_size(4 * 1024 * 1024 * 1024), "4.0 GB");
         assert_eq!(human_size(1536), "1.5 KB");
+    }
+
+    fn distro_named(name: &str) -> Distro {
+        Distro {
+            name: name.to_string(),
+            state: DistroState::Stopped,
+            version: 2,
+            is_default: false,
+            guid: None,
+            base_path: None,
+            vhd_path: None,
+            disk_bytes: None,
+        }
     }
 }

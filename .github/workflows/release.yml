@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustup reads rust-toolchain.toml and installs the pinned toolchain.
+      - name: Show toolchain
+        run: rustup show
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Publish release with binary
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/wslm.exe
+          generate_release_notes: true

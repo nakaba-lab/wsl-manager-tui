@@ -79,15 +79,45 @@ fn update_event(model: &mut Model, event: Event) -> Vec<Command> {
 fn handle_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
     if model.modal.is_some() {
         handle_modal_key(model, key)
+    } else if model.filter_mode {
+        handle_filter_key(model, key)
     } else {
         handle_list_key(model, key)
     }
 }
 
+fn handle_filter_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
+    match key.code {
+        KeyCode::Esc => {
+            model.filter.clear();
+            model.filter_mode = false;
+            model.selected = 0;
+        }
+        KeyCode::Enter => model.filter_mode = false,
+        KeyCode::Char(c) => {
+            model.filter.push(c);
+            model.selected = 0;
+        }
+        KeyCode::Backspace => {
+            model.filter.pop();
+            model.selected = 0;
+        }
+        _ => {}
+    }
+    vec![]
+}
+
 fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
     match (key.code, key.modifiers) {
-        (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => model.should_quit = true,
+        (KeyCode::Char('q'), _) => model.modal = Some(Modal::Quit),
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => model.should_quit = true,
+        // Esc clears an active filter (quit is via `q`).
+        (KeyCode::Esc, _) => {
+            model.filter.clear();
+            model.selected = 0;
+        }
+        (KeyCode::Char('/'), _) => model.filter_mode = true,
+        (KeyCode::Char('?'), _) => model.modal = Some(Modal::Help),
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => model.select_next(),
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => model.select_prev(),
         // Shift+Enter (where the terminal reports it) and `w` open a new tab;
@@ -224,7 +254,18 @@ fn handle_modal_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         Modal::Progress(progress) => handle_progress_key(model, progress, key),
         Modal::InstallPick(pick) => handle_install_key(model, pick, key),
         Modal::ConfigEdit(state) => handle_config_key(model, state, key),
+        // Any key dismisses help (the modal was already taken above).
+        Modal::Help => vec![],
+        Modal::Quit => handle_quit_key(model, key),
     }
+}
+
+fn handle_quit_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
+    if matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter) {
+        model.should_quit = true;
+    }
+    // Esc / n / any other key: the modal was already taken, so it closes.
+    vec![]
 }
 
 fn handle_confirm_key(model: &mut Model, mut confirm: Confirm, key: KeyEvent) -> Vec<Command> {
@@ -493,10 +534,66 @@ mod tests {
     }
 
     #[test]
-    fn q_quits() {
+    fn q_opens_quit_confirm_then_y_quits() {
         let mut m = Model::default();
-        assert!(update(&mut m, ch('q')).is_empty());
+        update(&mut m, ch('q'));
+        assert!(!m.should_quit, "q should ask, not quit immediately");
+        assert!(matches!(m.modal, Some(Modal::Quit)));
+        update(&mut m, ch('y'));
         assert!(m.should_quit);
+    }
+
+    #[test]
+    fn quit_confirm_can_be_cancelled() {
+        let mut m = Model::default();
+        update(&mut m, ch('q'));
+        update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!m.should_quit);
+        assert!(m.modal.is_none());
+    }
+
+    #[test]
+    fn slash_filters_the_list() {
+        let mut m = model_with(&["Debian", "Ubuntu", "kali-linux"]);
+        update(&mut m, ch('/'));
+        assert!(m.filter_mode);
+        for c in "ka".chars() {
+            update(&mut m, ch(c));
+        }
+        let visible: Vec<&str> = m
+            .visible_distros()
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect();
+        assert_eq!(visible, ["kali-linux"]);
+        // Enter exits filter mode but keeps the filter applied.
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!m.filter_mode);
+        assert_eq!(
+            m.selected_distro().map(|d| d.name.as_str()),
+            Some("kali-linux")
+        );
+    }
+
+    #[test]
+    fn filter_esc_clears_filter() {
+        let mut m = model_with(&["Debian", "Ubuntu"]);
+        update(&mut m, ch('/'));
+        update(&mut m, ch('U'));
+        update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!m.filter_mode);
+        assert!(m.filter.is_empty());
+        assert_eq!(m.visible_distros().len(), 2);
+    }
+
+    #[test]
+    fn question_opens_help() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('?'));
+        assert!(matches!(m.modal, Some(Modal::Help)));
+        // Any key dismisses.
+        update(&mut m, ch(' '));
+        assert!(m.modal.is_none());
     }
 
     #[test]

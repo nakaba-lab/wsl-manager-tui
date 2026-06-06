@@ -22,6 +22,10 @@ pub enum Modal {
     InstallPick(InstallPickState),
     /// The configuration editor (`.wslconfig` / `wsl.conf`).
     ConfigEdit(ConfigEditState),
+    /// The keybinding help overlay.
+    Help,
+    /// The quit confirmation dialog.
+    Quit,
 }
 
 /// A confirmation dialog. Destructive operations may require typing the distro

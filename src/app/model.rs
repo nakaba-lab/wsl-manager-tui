@@ -15,8 +15,12 @@ pub struct Model {
     pub ticks: u64,
     /// The registered distributions, as of the last refresh.
     pub distros: Vec<Distro>,
-    /// Index of the selected row in [`Model::distros`].
+    /// Index of the selected row within the *visible* (filtered) list.
     pub selected: usize,
+    /// Case-insensitive name filter (empty = no filter).
+    pub filter: String,
+    /// Whether keystrokes are currently editing the filter.
+    pub filter_mode: bool,
     /// The most recent background error (e.g. a failed refresh).
     pub last_error: Option<String>,
     /// A transient status message (e.g. the result of an operation).
@@ -32,15 +36,29 @@ pub struct Model {
 }
 
 impl Model {
-    /// The currently selected distribution, if the list is non-empty.
-    pub fn selected_distro(&self) -> Option<&Distro> {
-        self.distros.get(self.selected)
+    /// The distributions matching the current filter (all, if no filter).
+    pub fn visible_distros(&self) -> Vec<&Distro> {
+        if self.filter.is_empty() {
+            self.distros.iter().collect()
+        } else {
+            let needle = self.filter.to_ascii_lowercase();
+            self.distros
+                .iter()
+                .filter(|distro| distro.name.to_ascii_lowercase().contains(&needle))
+                .collect()
+        }
     }
 
-    /// Move the selection down by one, clamped to the last row.
+    /// The currently selected distribution within the visible list.
+    pub fn selected_distro(&self) -> Option<&Distro> {
+        self.visible_distros().get(self.selected).copied()
+    }
+
+    /// Move the selection down by one, clamped to the last visible row.
     pub(crate) fn select_next(&mut self) {
-        if !self.distros.is_empty() {
-            self.selected = (self.selected + 1).min(self.distros.len() - 1);
+        let count = self.visible_distros().len();
+        if count > 0 {
+            self.selected = (self.selected + 1).min(count - 1);
         }
     }
 
@@ -49,12 +67,13 @@ impl Model {
         self.selected = self.selected.saturating_sub(1);
     }
 
-    /// Keep the selection index within the bounds of the current list.
+    /// Keep the selection index within the bounds of the visible list.
     pub(crate) fn clamp_selection(&mut self) {
-        if self.distros.is_empty() {
+        let count = self.visible_distros().len();
+        if count == 0 {
             self.selected = 0;
-        } else if self.selected >= self.distros.len() {
-            self.selected = self.distros.len() - 1;
+        } else if self.selected >= count {
+            self.selected = count - 1;
         }
     }
 }
