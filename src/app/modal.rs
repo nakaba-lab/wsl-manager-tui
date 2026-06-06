@@ -1,7 +1,7 @@
 //! Modal dialog state overlaid on the main list.
 
 use super::config_edit::ConfigEditState;
-use super::message::LifecycleOp;
+use super::message::Command;
 use crate::wsl::OnlineDistro;
 
 /// An overlay dialog on top of the main list.
@@ -29,15 +29,19 @@ pub enum Modal {
 }
 
 /// A confirmation dialog. Destructive operations may require typing the distro
-/// name to proceed.
+/// name to proceed. On confirmation, [`Confirm::on_confirm`] commands are run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Confirm {
-    /// The operation to run if confirmed.
-    pub op: LifecycleOp,
     /// The prompt shown to the user.
     pub prompt: String,
     /// When set, the user must type the expected name to proceed.
     pub require_typed: Option<TypedConfirm>,
+    /// Commands to dispatch when confirmed.
+    pub on_confirm: Vec<Command>,
+    /// If set, a progress dialog with this title opens on confirmation.
+    pub progress_title: Option<String>,
+    /// If set, this status message is shown on confirmation.
+    pub status: Option<String>,
 }
 
 /// State for a "type the name to confirm" guard.

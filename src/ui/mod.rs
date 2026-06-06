@@ -457,7 +457,7 @@ fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Confirm, LifecycleOp, Modal, TypedConfirm};
+    use crate::app::{Confirm, Modal, TypedConfirm};
     use crate::wsl::{Distro, DistroState};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -504,12 +504,14 @@ mod tests {
     fn renders_confirm_modal() {
         let mut model = sample();
         model.modal = Some(Modal::Confirm(Confirm {
-            op: LifecycleOp::Unregister("Debian".to_string()),
             prompt: "PERMANENTLY delete 'Debian'.".to_string(),
             require_typed: Some(TypedConfirm {
                 expected: "Debian".to_string(),
                 input: "Deb".to_string(),
             }),
+            on_confirm: vec![],
+            progress_title: None,
+            status: None,
         }));
         let rendered = render(&model, 110, 24);
         assert!(rendered.contains("Confirm"), "confirm title missing");

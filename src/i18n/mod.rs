@@ -68,6 +68,7 @@ pub enum Key {
     PromptTerminate,
     PromptShutdown,
     PromptUnregister,
+    PromptImportOverwrite,
 }
 
 impl Key {
@@ -104,6 +105,7 @@ impl Key {
         Key::PromptTerminate,
         Key::PromptShutdown,
         Key::PromptUnregister,
+        Key::PromptImportOverwrite,
     ];
 }
 
@@ -170,6 +172,10 @@ fn entry(key: Key) -> (&'static str, &'static str) {
         Key::PromptUnregister => (
             "PERMANENTLY delete '{}' and ALL its data.",
             "'{}' とその全データを完全に削除します。",
+        ),
+        Key::PromptImportOverwrite => (
+            "'{}' already exists. Overwrite it?",
+            "'{}' は既に存在します。上書きしますか？",
         ),
     }
 }

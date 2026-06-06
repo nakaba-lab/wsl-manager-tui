@@ -213,17 +213,21 @@ fn open_confirm_terminate(model: &mut Model) {
     };
     let prompt = tf(model.lang, Key::PromptTerminate, &[&name]);
     model.modal = Some(Modal::Confirm(Confirm {
-        op: LifecycleOp::Terminate(name),
         prompt,
         require_typed: None,
+        on_confirm: vec![Command::Lifecycle(LifecycleOp::Terminate(name))],
+        progress_title: None,
+        status: None,
     }));
 }
 
 fn open_confirm_shutdown(model: &mut Model) {
     model.modal = Some(Modal::Confirm(Confirm {
-        op: LifecycleOp::Shutdown,
         prompt: tf(model.lang, Key::PromptShutdown, &[]),
         require_typed: None,
+        on_confirm: vec![Command::Lifecycle(LifecycleOp::Shutdown)],
+        progress_title: None,
+        status: None,
     }));
 }
 
@@ -233,12 +237,14 @@ fn open_confirm_unregister(model: &mut Model) {
     };
     let prompt = tf(model.lang, Key::PromptUnregister, &[&name]);
     model.modal = Some(Modal::Confirm(Confirm {
-        op: LifecycleOp::Unregister(name.clone()),
         prompt,
         require_typed: Some(TypedConfirm {
-            expected: name,
+            expected: name.clone(),
             input: String::new(),
         }),
+        on_confirm: vec![Command::Lifecycle(LifecycleOp::Unregister(name))],
+        progress_title: None,
+        status: None,
     }));
 }
 
@@ -278,7 +284,7 @@ fn handle_confirm_key(model: &mut Model, mut confirm: Confirm, key: KeyEvent) ->
                 .as_ref()
                 .is_none_or(TypedConfirm::matches)
             {
-                confirm_op(model, confirm.op)
+                confirm_action(model, confirm)
             } else {
                 // Typed name does not match: keep the dialog open.
                 model.modal = Some(Modal::Confirm(confirm));
@@ -291,7 +297,7 @@ fn handle_confirm_key(model: &mut Model, mut confirm: Confirm, key: KeyEvent) ->
                 model.modal = Some(Modal::Confirm(confirm));
                 vec![]
             } else if matches!(c, 'y' | 'Y') {
-                confirm_op(model, confirm.op)
+                confirm_action(model, confirm)
             } else if matches!(c, 'n' | 'N') {
                 vec![] // cancelled
             } else {
@@ -313,9 +319,14 @@ fn handle_confirm_key(model: &mut Model, mut confirm: Confirm, key: KeyEvent) ->
     }
 }
 
-fn confirm_op(model: &mut Model, op: LifecycleOp) -> Vec<Command> {
-    model.status = Some(format!("{}…", op.verb()));
-    vec![Command::Lifecycle(op)]
+fn confirm_action(model: &mut Model, confirm: Confirm) -> Vec<Command> {
+    if let Some(title) = confirm.progress_title {
+        model.modal = Some(Modal::Progress(ProgressState::new(title)));
+    }
+    if let Some(status) = confirm.status {
+        model.status = Some(status);
+    }
+    confirm.on_confirm
 }
 
 fn handle_form_key(model: &mut Model, mut form: FormState, key: KeyEvent) -> Vec<Command> {
@@ -373,14 +384,29 @@ fn submit_form(model: &mut Model, form: FormState) -> Vec<Command> {
                 model.modal = Some(Modal::Form(form));
                 return vec![];
             }
-            model.modal = Some(Modal::Progress(ProgressState::new(format!(
-                "Importing '{name}'"
-            ))));
-            vec![Command::Import {
-                name,
+            let title = format!("Importing '{name}'");
+            let import = Command::Import {
+                name: name.clone(),
                 dir: PathBuf::from(dir),
                 tar: PathBuf::from(tar),
-            }]
+            };
+            // If a distro with this name already exists, confirm the overwrite.
+            if model
+                .distros
+                .iter()
+                .any(|distro| distro.name.eq_ignore_ascii_case(&name))
+            {
+                model.modal = Some(Modal::Confirm(Confirm {
+                    prompt: tf(model.lang, Key::PromptImportOverwrite, &[&name]),
+                    require_typed: None,
+                    on_confirm: vec![import],
+                    progress_title: Some(title),
+                    status: None,
+                }));
+                return vec![];
+            }
+            model.modal = Some(Modal::Progress(ProgressState::new(title)));
+            vec![import]
         }
     }
 }
@@ -821,6 +847,50 @@ mod tests {
         let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(cmds.is_empty());
         assert!(matches!(m.modal, Some(Modal::Form(_))));
+    }
+
+    #[test]
+    fn import_existing_name_asks_to_overwrite() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('m')); // import form
+        let fill = |m: &mut Model, text: &str| {
+            for c in text.chars() {
+                update(m, ch(c));
+            }
+        };
+        fill(&mut m, "Debian"); // name (collides with existing)
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        fill(&mut m, "C:/wsl/dir");
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        fill(&mut m, "C:/backup.tar");
+        // Submit: collision -> overwrite confirmation, no command yet.
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(cmds.is_empty(), "should confirm before overwriting");
+        assert!(matches!(m.modal, Some(Modal::Confirm(_))));
+        // Confirm -> Import dispatched and a progress dialog opens.
+        let cmds = update(&mut m, ch('y'));
+        assert!(matches!(cmds.as_slice(), [Command::Import { .. }]));
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
+    }
+
+    #[test]
+    fn import_new_name_skips_overwrite_confirm() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('m'));
+        for c in "Fresh".chars() {
+            update(&mut m, ch(c));
+        }
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "C:/d".chars() {
+            update(&mut m, ch(c));
+        }
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "C:/t.tar".chars() {
+            update(&mut m, ch(c));
+        }
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(cmds.as_slice(), [Command::Import { .. }]));
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
     }
 
     #[test]
