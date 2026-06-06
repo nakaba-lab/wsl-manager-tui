@@ -11,6 +11,7 @@ use super::{
     InstallPickState, LifecycleOp, Modal, Model, ProgressState, TypedConfirm,
 };
 use crate::config::ConfigTarget;
+use crate::i18n::{tf, Key};
 
 /// Advance the model in response to an action, returning any side effects.
 pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
@@ -108,6 +109,10 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         }
         (KeyCode::Char('c'), _) => return load_config(model, ConfigTarget::WslConfig),
         (KeyCode::Char('C'), _) => return load_wslconf(model),
+        (KeyCode::Char('L'), _) => {
+            model.lang = model.lang.toggled();
+            return vec![Command::SavePrefs];
+        }
         _ => {}
     }
     vec![]
@@ -176,9 +181,10 @@ fn open_confirm_terminate(model: &mut Model) {
     let Some(name) = selected_name(model) else {
         return;
     };
+    let prompt = tf(model.lang, Key::PromptTerminate, &[&name]);
     model.modal = Some(Modal::Confirm(Confirm {
-        op: LifecycleOp::Terminate(name.clone()),
-        prompt: format!("Terminate (stop) '{name}'?"),
+        op: LifecycleOp::Terminate(name),
+        prompt,
         require_typed: None,
     }));
 }
@@ -186,7 +192,7 @@ fn open_confirm_terminate(model: &mut Model) {
 fn open_confirm_shutdown(model: &mut Model) {
     model.modal = Some(Modal::Confirm(Confirm {
         op: LifecycleOp::Shutdown,
-        prompt: "Shut down ALL running WSL distributions?".to_string(),
+        prompt: tf(model.lang, Key::PromptShutdown, &[]),
         require_typed: None,
     }));
 }
@@ -195,9 +201,10 @@ fn open_confirm_unregister(model: &mut Model) {
     let Some(name) = selected_name(model) else {
         return;
     };
+    let prompt = tf(model.lang, Key::PromptUnregister, &[&name]);
     model.modal = Some(Modal::Confirm(Confirm {
         op: LifecycleOp::Unregister(name.clone()),
-        prompt: format!("PERMANENTLY delete '{name}' and ALL its data."),
+        prompt,
         require_typed: Some(TypedConfirm {
             expected: name,
             input: String::new(),
@@ -850,5 +857,15 @@ mod tests {
             Some(Modal::ConfigEdit(state)) => assert_eq!(state.mode, EditMode::Raw),
             _ => panic!("expected config editor"),
         }
+    }
+
+    #[test]
+    fn shift_l_toggles_language_and_saves() {
+        use crate::i18n::Lang;
+        let mut m = Model::default();
+        assert_eq!(m.lang, Lang::En);
+        let cmds = update(&mut m, key(KeyCode::Char('L'), KeyModifiers::SHIFT));
+        assert_eq!(m.lang, Lang::Ja);
+        assert_eq!(cmds, vec![Command::SavePrefs]);
     }
 }

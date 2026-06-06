@@ -15,6 +15,7 @@ use crate::app::{
     ConfigEditState, Confirm, EditMode, FormKind, FormState, InstallPickState, Modal, Model,
     ProgressState,
 };
+use crate::i18n::{t, Key, Lang};
 use crate::metrics::MetricsHistory;
 use crate::wsl::{Distro, DistroState};
 
@@ -31,11 +32,12 @@ pub fn view(f: &mut Frame, model: &Model) {
     render_detail(f, model, chunks[1]);
     render_status(f, model, chunks[2]);
     if let Some(modal) = &model.modal {
-        render_modal(f, modal, area);
+        render_modal(f, modal, model.lang, area);
     }
 }
 
 fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
+    let lang = model.lang;
     let title = match model.selected_distro() {
         Some(distro) => format!(" Detail: {} ", distro.name),
         None => " Detail ".to_string(),
@@ -45,7 +47,7 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
     f.render_widget(block, area);
 
     let Some(distro) = model.selected_distro() else {
-        f.render_widget(Paragraph::new("No distributions."), inner);
+        f.render_widget(Paragraph::new(t(lang, Key::NoDistros)), inner);
         return;
     };
 
@@ -60,15 +62,21 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
         .disk_bytes
         .map(human_size)
         .unwrap_or_else(|| "—".to_string());
-    let default = if distro.is_default { "yes" } else { "no" };
+    let default = if distro.is_default { "★" } else { "—" };
     let info = format!(
-        "State:   {}\nVersion: {}    Default: {}\nDisk:    {}\nPath:    {}\nVM Mem:  {}",
-        state_label(distro.state),
+        "{}: {}\n{}: {}    {}: {}\n{}: {}\n{}: {}\n{}: {}",
+        t(lang, Key::DetailState),
+        state_label(lang, distro.state),
+        t(lang, Key::DetailVersion),
         distro.version,
+        t(lang, Key::DetailDefault),
         default,
+        t(lang, Key::DetailDisk),
         disk,
+        t(lang, Key::DetailPath),
         path,
-        vm_mem_line(&model.metrics),
+        t(lang, Key::DetailVmMem),
+        vm_mem_line(lang, &model.metrics),
     );
     f.render_widget(Paragraph::new(info), rows[0]);
 
@@ -79,22 +87,30 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
     f.render_widget(sparkline, rows[1]);
 }
 
-fn vm_mem_line(metrics: &MetricsHistory) -> String {
+fn vm_mem_line(lang: Lang, metrics: &MetricsHistory) -> String {
+    let note = t(lang, Key::VmSharedNote);
     match metrics.latest_vmmem {
         Some(used) if metrics.total_mem_bytes > 0 => format!(
-            "{} / {} (vmmemWSL, shared by all distros)",
+            "{} / {} {note}",
             human_size(used),
             human_size(metrics.total_mem_bytes)
         ),
-        Some(used) => format!("{} (vmmemWSL, shared by all distros)", human_size(used)),
-        None => "— (WSL VM not running)".to_string(),
+        Some(used) => format!("{} {note}", human_size(used)),
+        None => t(lang, Key::VmNotRunning).to_string(),
     }
 }
 
 fn render_table(f: &mut Frame, model: &Model, area: Rect) {
-    let header = Row::new(["NAME", "STATE", "VER", "DEFAULT", "DISK"])
-        .style(Style::default().add_modifier(Modifier::BOLD));
-    let rows = model.distros.iter().map(distro_row);
+    let lang = model.lang;
+    let header = Row::new([
+        t(lang, Key::ColName),
+        t(lang, Key::ColState),
+        t(lang, Key::ColVer),
+        t(lang, Key::ColDefault),
+        t(lang, Key::ColDisk),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD));
+    let rows = model.distros.iter().map(|distro| distro_row(lang, distro));
     let widths = [
         Constraint::Min(16),
         Constraint::Length(12),
@@ -107,7 +123,7 @@ fn render_table(f: &mut Frame, model: &Model, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" WSL Manager (wslm) "),
+                .title(format!(" WSL Manager (wslm) · {} ", lang.label())),
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
@@ -119,8 +135,12 @@ fn render_table(f: &mut Frame, model: &Model, area: Rect) {
     f.render_stateful_widget(table, area, &mut state);
 }
 
-fn distro_row(distro: &Distro) -> Row<'static> {
-    let state = format!("{} {}", distro.state.glyph(), state_label(distro.state));
+fn distro_row(lang: Lang, distro: &Distro) -> Row<'static> {
+    let state = format!(
+        "{} {}",
+        distro.state.glyph(),
+        state_label(lang, distro.state)
+    );
     let default = if distro.is_default { "★" } else { "" };
     let disk = distro
         .disk_bytes
@@ -135,46 +155,50 @@ fn distro_row(distro: &Distro) -> Row<'static> {
     ])
 }
 
-fn state_label(state: DistroState) -> &'static str {
-    match state {
-        DistroState::Running => "Running",
-        DistroState::Stopped => "Stopped",
-        DistroState::Installing => "Installing",
-        DistroState::Unknown => "Unknown",
-    }
+fn state_label(lang: Lang, state: DistroState) -> &'static str {
+    t(
+        lang,
+        match state {
+            DistroState::Running => Key::StateRunning,
+            DistroState::Stopped => Key::StateStopped,
+            DistroState::Installing => Key::StateInstalling,
+            DistroState::Unknown => Key::StateUnknown,
+        },
+    )
 }
 
 fn render_status(f: &mut Frame, model: &Model, area: Rect) {
+    let lang = model.lang;
     let (text, style) = if let Some(error) = &model.last_error {
-        (format!("error: {error}"), Style::default().fg(Color::Red))
+        (
+            format!("{}: {error}", t(lang, Key::ErrorPrefix)),
+            Style::default().fg(Color::Red),
+        )
     } else if let Some(status) = &model.status {
         (status.clone(), Style::default().fg(Color::Green))
     } else if !model.loaded {
-        ("loading…".to_string(), Style::default().fg(Color::DarkGray))
-    } else {
         (
-            format!(
-                "{} distro(s) · j/k · Enter shell · s start · x stop · X shutdown · d default · u unreg · e export · m import · i install · c/C config · r refresh · q quit",
-                model.distros.len()
-            ),
-            Style::default(),
+            t(lang, Key::Loading).to_string(),
+            Style::default().fg(Color::DarkGray),
         )
+    } else {
+        (t(lang, Key::StatusHint).to_string(), Style::default())
     };
     f.render_widget(Paragraph::new(text).style(style), area);
 }
 
-fn render_modal(f: &mut Frame, modal: &Modal, area: Rect) {
+fn render_modal(f: &mut Frame, modal: &Modal, lang: Lang, area: Rect) {
     match modal {
-        Modal::Confirm(confirm) => render_confirm(f, confirm, area),
-        Modal::Error { message } => render_error(f, message, area),
+        Modal::Confirm(confirm) => render_confirm(f, confirm, lang, area),
+        Modal::Error { message } => render_error(f, message, lang, area),
         Modal::Form(form) => render_form(f, form, area),
-        Modal::Progress(progress) => render_progress(f, progress, area),
-        Modal::InstallPick(pick) => render_install_pick(f, pick, area),
-        Modal::ConfigEdit(state) => render_config_edit(f, state, area),
+        Modal::Progress(progress) => render_progress(f, progress, lang, area),
+        Modal::InstallPick(pick) => render_install_pick(f, pick, lang, area),
+        Modal::ConfigEdit(state) => render_config_edit(f, state, lang, area),
     }
 }
 
-fn render_config_edit(f: &mut Frame, state: &ConfigEditState, area: Rect) {
+fn render_config_edit(f: &mut Frame, state: &ConfigEditState, lang: Lang, area: Rect) {
     let popup = centered_rect(82, 26, area);
     f.render_widget(Clear, popup);
     let mode = match state.mode {
@@ -194,10 +218,7 @@ fn render_config_edit(f: &mut Frame, state: &ConfigEditState, area: Rect) {
         EditMode::Form => render_config_form(f, state, rows[0]),
         EditMode::Raw => render_config_raw(f, state, rows[0]),
     }
-    f.render_widget(
-        Paragraph::new("Tab: form/raw · Ctrl+S: save · Esc: cancel"),
-        rows[1],
-    );
+    f.render_widget(Paragraph::new(t(lang, Key::ConfigSaveHint)), rows[1]);
 }
 
 fn render_config_form(f: &mut Frame, state: &ConfigEditState, area: Rect) {
@@ -252,7 +273,7 @@ fn render_form(f: &mut Frame, form: &FormState, area: Rect) {
     f.render_widget(Paragraph::new(text), inner);
 }
 
-fn render_progress(f: &mut Frame, progress: &ProgressState, area: Rect) {
+fn render_progress(f: &mut Frame, progress: &ProgressState, lang: Lang, area: Rect) {
     let popup = centered_rect(60, 5, area);
     f.render_widget(Clear, popup);
     let block = Block::default()
@@ -260,19 +281,20 @@ fn render_progress(f: &mut Frame, progress: &ProgressState, area: Rect) {
         .title(" Working ")
         .border_style(Style::default().fg(Color::Cyan));
     let text = format!(
-        "{} {}…\n\nThis may take a while. Esc to cancel.",
+        "{} {}…\n\n{}",
         progress.spinner(),
-        progress.title
+        progress.title,
+        t(lang, Key::ProgressHint)
     );
     f.render_widget(Paragraph::new(text).block(block), popup);
 }
 
-fn render_install_pick(f: &mut Frame, pick: &InstallPickState, area: Rect) {
+fn render_install_pick(f: &mut Frame, pick: &InstallPickState, lang: Lang, area: Rect) {
     let popup = centered_rect(74, 22, area);
     f.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Install — select a distribution ");
+        .title(t(lang, Key::InstallTitle));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
@@ -299,13 +321,10 @@ fn render_install_pick(f: &mut Frame, pick: &InstallPickState, area: Rect) {
     }
     f.render_stateful_widget(list, rows[1], &mut state);
 
-    f.render_widget(
-        Paragraph::new("type to filter · ↑/↓ select · Enter install · Esc cancel"),
-        rows[2],
-    );
+    f.render_widget(Paragraph::new(t(lang, Key::InstallHint)), rows[2]);
 }
 
-fn render_confirm(f: &mut Frame, confirm: &Confirm, area: Rect) {
+fn render_confirm(f: &mut Frame, confirm: &Confirm, lang: Lang, area: Rect) {
     let mut lines: Vec<String> = confirm.prompt.lines().map(String::from).collect();
     if let Some(typed) = &confirm.require_typed {
         lines.push(String::new());
@@ -316,9 +335,9 @@ fn render_confirm(f: &mut Frame, confirm: &Confirm, area: Rect) {
     }
     lines.push(String::new());
     lines.push(if confirm.require_typed.is_some() {
-        "Enter: confirm (must match) · Esc: cancel".to_string()
+        t(lang, Key::ConfirmHintTyped).to_string()
     } else {
-        "Enter / y: confirm · Esc / n: cancel".to_string()
+        t(lang, Key::ConfirmHintYesNo).to_string()
     });
 
     let height = lines.len() as u16 + 2;
@@ -336,7 +355,7 @@ fn render_confirm(f: &mut Frame, confirm: &Confirm, area: Rect) {
     );
 }
 
-fn render_error(f: &mut Frame, message: &str, area: Rect) {
+fn render_error(f: &mut Frame, message: &str, lang: Lang, area: Rect) {
     let popup = centered_rect(64, 7, area);
     f.render_widget(Clear, popup);
     let block = Block::default()
@@ -344,7 +363,7 @@ fn render_error(f: &mut Frame, message: &str, area: Rect) {
         .title(" Error ")
         .border_style(Style::default().fg(Color::Red));
     f.render_widget(
-        Paragraph::new(format!("{message}\n\nPress any key to dismiss."))
+        Paragraph::new(format!("{message}\n\n{}", t(lang, Key::ErrorDismiss)))
             .block(block)
             .wrap(Wrap { trim: true }),
         popup,
@@ -516,6 +535,19 @@ mod tests {
         assert!(rendered.contains("memory"), "known key missing");
         assert!(rendered.contains("8GB"), "value missing");
         assert!(rendered.contains("Form"), "mode indicator missing");
+    }
+
+    #[test]
+    fn renders_in_japanese_when_lang_is_ja() {
+        let mut model = sample();
+        model.lang = Lang::Ja;
+        let rendered = render(&model, 110, 24);
+        // Wide (CJK) glyphs occupy two terminal cells; the continuation cell
+        // breaks up multi-char substrings in the test buffer, so we match the
+        // leading glyph of each translated string instead.
+        assert!(rendered.contains('名'), "JA column header missing"); // 名前 (NAME)
+        assert!(rendered.contains('実'), "JA running state missing"); // 実行中 (Running)
+        assert!(rendered.contains("JA"), "language indicator missing");
     }
 
     #[test]

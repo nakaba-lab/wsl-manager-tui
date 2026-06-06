@@ -103,6 +103,8 @@ pub enum Command {
         /// The new contents.
         content: String,
     },
+    /// Persist the current preferences (e.g. after a language change).
+    SavePrefs,
 }
 
 /// A distribution lifecycle operation.

@@ -1,6 +1,7 @@
 //! The application model (state). It grows with each milestone.
 
 use super::modal::Modal;
+use crate::i18n::Lang;
 use crate::metrics::MetricsHistory;
 use crate::wsl::Distro;
 
@@ -24,6 +25,8 @@ pub struct Model {
     pub modal: Option<Modal>,
     /// Ring-buffer history of resource samples (drives the sparkline).
     pub metrics: MetricsHistory,
+    /// The current UI language.
+    pub lang: Lang,
     /// False until the first refresh completes (drives a "loading" hint).
     pub loaded: bool,
 }

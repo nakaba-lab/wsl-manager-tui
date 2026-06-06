@@ -21,29 +21,37 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use crate::app::{update, Action, Command, Event, LifecycleOp, Model};
 use crate::config::{self, ConfigTarget};
 use crate::metrics;
+use crate::prefs::Prefs;
 use crate::ui;
 use crate::wsl::{self, RealWslBackend, WslBackend};
 
-/// Polling interval for the distro list (made configurable via prefs in M8).
-const TICK: Duration = Duration::from_secs(2);
 /// Animation interval for spinners (no polling).
 const FRAME: Duration = Duration::from_millis(120);
 
 /// Set up the terminal and run the event loop to completion, restoring the
 /// terminal afterwards regardless of how the loop ended.
-pub async fn run() -> Result<()> {
+pub async fn run(prefs: Prefs) -> Result<()> {
     let backend: Arc<dyn WslBackend> = Arc::new(RealWslBackend);
-    let mut model = Model::default();
+    let mut model = Model {
+        lang: prefs.effective_lang(),
+        metrics: metrics::MetricsHistory::new(prefs.history_len),
+        ..Default::default()
+    };
     let mut tui = Tui::new()?;
     tui.enter()?;
-    let result = event_loop(&mut tui, &mut model, backend).await;
+    let result = event_loop(&mut tui, &mut model, backend, prefs).await;
     let _ = tui.exit();
     result
 }
 
-async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBackend>) -> Result<()> {
+async fn event_loop(
+    tui: &mut Tui,
+    model: &mut Model,
+    backend: Arc<dyn WslBackend>,
+    mut prefs: Prefs,
+) -> Result<()> {
     let mut events = EventStream::new();
-    let mut tick = tokio::time::interval(TICK);
+    let mut tick = tokio::time::interval(Duration::from_secs(prefs.poll_interval()));
     let mut frame = tokio::time::interval(FRAME);
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
     // Abort handle for the in-flight long-running operation (export/import/install).
@@ -96,6 +104,10 @@ async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBacken
                     if let Some(handle) = current_op.take() {
                         handle.abort();
                     }
+                }
+                Command::SavePrefs => {
+                    prefs.lang = Some(model.lang);
+                    let _ = crate::prefs::save(&prefs);
                 }
                 spawnable => dispatch(spawnable, &backend, &action_tx),
             }
@@ -258,7 +270,8 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
         | Command::Export { .. }
         | Command::Import { .. }
         | Command::Install { .. }
-        | Command::CancelOp => {}
+        | Command::CancelOp
+        | Command::SavePrefs => {}
     }
 }
 
