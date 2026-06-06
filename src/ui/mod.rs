@@ -18,6 +18,7 @@ use crate::app::{
 use crate::i18n::{t, tf, Key, Lang};
 use crate::metrics::MetricsHistory;
 use crate::wsl::{Distro, DistroState};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Render the whole UI for the current model.
 pub fn view(f: &mut Frame, model: &Model) {
@@ -59,6 +60,11 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "—".to_string());
+    // Truncate the (possibly long, possibly CJK) path to the pane width using
+    // display-column widths so multi-cell glyphs are not split.
+    let path_budget =
+        (inner.width as usize).saturating_sub(UnicodeWidthStr::width(t(lang, Key::DetailPath)) + 2);
+    let path = truncate_width(&path, path_budget);
     let disk = distro
         .disk_bytes
         .map(human_size)
@@ -426,6 +432,30 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     }
 }
 
+/// Truncate `s` to at most `max` display columns (CJK-aware), appending `…`
+/// when characters are dropped.
+fn truncate_width(s: &str, max: usize) -> String {
+    if UnicodeWidthStr::width(s) <= max {
+        return s.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let budget = max - 1; // leave a column for the ellipsis
+    let mut out = String::new();
+    let mut width = 0;
+    for c in s.chars() {
+        let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+        if width + cw > budget {
+            break;
+        }
+        out.push(c);
+        width += cw;
+    }
+    out.push('…');
+    out
+}
+
 /// Human-readable byte size using binary units.
 fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
@@ -626,6 +656,15 @@ mod tests {
         let rendered = render(&model, 90, 24);
         assert!(rendered.contains("Ubuntu"), "matching row missing");
         assert!(!rendered.contains("Debian"), "filtered-out row present");
+    }
+
+    #[test]
+    fn truncate_width_respects_cjk_columns() {
+        assert_eq!(truncate_width("short", 10), "short");
+        assert_eq!(truncate_width("abcdef", 4), "abc…");
+        // Each CJK glyph is two columns: 3 glyphs = 6 columns; budget 5 -> 2
+        // glyphs (4 cols) + ellipsis.
+        assert_eq!(truncate_width("あいう", 5), "あい…");
     }
 
     #[test]
