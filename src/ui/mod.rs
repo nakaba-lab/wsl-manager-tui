@@ -12,8 +12,8 @@ use ratatui::widgets::{
 use ratatui::Frame;
 
 use crate::app::{
-    ConfigEditState, Confirm, EditMode, FormKind, FormState, InstallPickState, Modal, Model,
-    ProgressState,
+    ConfigEditState, Confirm, EditMode, FormKind, FormState, ImportPickState, InstallPickState,
+    Modal, Model, ProgressState,
 };
 use crate::i18n::{t, tf, Key, Lang};
 use crate::metrics::MetricsHistory;
@@ -224,6 +224,7 @@ fn render_modal(f: &mut Frame, modal: &Modal, lang: Lang, area: Rect) {
         Modal::Form(form) => render_form(f, form, lang, area),
         Modal::Progress(progress) => render_progress(f, progress, lang, area),
         Modal::InstallPick(pick) => render_install_pick(f, pick, lang, area),
+        Modal::ImportPick(pick) => render_import_pick(f, pick, lang, area),
         Modal::ConfigEdit(state) => render_config_edit(f, state, lang, area),
         Modal::Help => render_help(f, lang, area),
         Modal::Quit => render_quit(f, lang, area),
@@ -309,7 +310,7 @@ fn render_form(f: &mut Frame, form: &FormState, lang: Lang, area: Rect) {
         lang,
         match &form.kind {
             FormKind::Export { .. } => Key::FormExportTitle,
-            FormKind::Import => Key::FormImportTitle,
+            FormKind::ImportName { .. } | FormKind::ImportCustom => Key::FormImportTitle,
         },
     );
     let popup = centered_rect(72, form.fields.len() as u16 * 2 + 5, area);
@@ -330,6 +331,10 @@ fn render_form(f: &mut Frame, form: &FormState, lang: Lang, area: Rect) {
     }
     text.push('\n');
     text.push_str(t(lang, Key::FormFooter));
+    if matches!(form.kind, FormKind::Export { .. }) {
+        text.push('\n');
+        text.push_str(t(lang, Key::ExportFormatHint));
+    }
     f.render_widget(Paragraph::new(text), inner);
 }
 
@@ -382,6 +387,36 @@ fn render_install_pick(f: &mut Frame, pick: &InstallPickState, lang: Lang, area:
     f.render_stateful_widget(list, rows[1], &mut state);
 
     f.render_widget(Paragraph::new(t(lang, Key::InstallHint)), rows[2]);
+}
+
+fn render_import_pick(f: &mut Frame, pick: &ImportPickState, lang: Lang, area: Rect) {
+    let popup = centered_rect(74, 22, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(t(lang, Key::PickImportTitle));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+
+    if pick.entries.is_empty() {
+        f.render_widget(Paragraph::new(t(lang, Key::PickImportEmpty)), rows[0]);
+    } else {
+        let items: Vec<ListItem> = pick
+            .entries
+            .iter()
+            .map(|a| ListItem::new(format!("{:<44} {}", a.name, human_size(a.size))))
+            .collect();
+        let list = List::new(items)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol("▶ ");
+        let mut state = ListState::default();
+        state.select(Some(pick.selected.min(pick.entries.len() - 1)));
+        f.render_stateful_widget(list, rows[0], &mut state);
+    }
+
+    f.render_widget(Paragraph::new(t(lang, Key::PickImportHints)), rows[1]);
 }
 
 fn render_confirm(f: &mut Frame, confirm: &Confirm, lang: Lang, area: Rect) {
@@ -555,6 +590,24 @@ mod tests {
         assert!(rendered.contains("Install"), "picker title missing");
         assert!(rendered.contains("Ubuntu"), "Ubuntu missing");
         assert!(rendered.contains("Debian"), "Debian missing");
+    }
+
+    #[test]
+    fn renders_import_pick_modal() {
+        use crate::app::ImportPickState;
+        let mut model = sample();
+        model.modal = Some(Modal::ImportPick(ImportPickState::new(vec![
+            crate::manage::Archive {
+                name: "Ubuntu-20260607.tar.gz".into(),
+                path: std::path::PathBuf::from(r"C:\wsl\exports\Ubuntu-20260607.tar.gz"),
+                size: 1024,
+            },
+        ])));
+        let rendered = render(&model, 100, 30);
+        assert!(
+            rendered.contains("Ubuntu-20260607.tar.gz"),
+            "picker should list the archive"
+        );
     }
 
     #[test]

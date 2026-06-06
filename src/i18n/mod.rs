@@ -90,9 +90,15 @@ pub enum Key {
     QuitPrompt,
     // Form field labels.
     LabelExportPath,
-    LabelImportName,
-    LabelImportDir,
-    LabelImportTar,
+    LabelImportNameOnly,
+    LabelImportCustomArchive,
+    // Import picker / managed folder.
+    PickImportTitle,
+    PickImportEmpty,
+    PickImportHints,
+    ExportFormatHint,
+    PromptDeleteArchive,
+    DoneDeletedArchive,
     // Prompts.
     PromptTerminate,
     PromptShutdown,
@@ -179,9 +185,14 @@ impl Key {
         Key::HelpBody,
         Key::QuitPrompt,
         Key::LabelExportPath,
-        Key::LabelImportName,
-        Key::LabelImportDir,
-        Key::LabelImportTar,
+        Key::LabelImportNameOnly,
+        Key::LabelImportCustomArchive,
+        Key::PickImportTitle,
+        Key::PickImportEmpty,
+        Key::PickImportHints,
+        Key::ExportFormatHint,
+        Key::PromptDeleteArchive,
+        Key::DoneDeletedArchive,
         Key::PromptTerminate,
         Key::PromptShutdown,
         Key::PromptUnregister,
@@ -297,10 +308,27 @@ fn entry(key: Key) -> (&'static str, &'static str) {
             "Quit wslm?\n\nEnter / y: quit · Esc / n: stay",
             "wslm を終了しますか？\n\nEnter / y: 終了 · Esc / n: 戻る",
         ),
-        Key::LabelExportPath => ("Output .tar path", "出力 .tar パス"),
-        Key::LabelImportName => ("New distro name", "新しいディストロ名"),
-        Key::LabelImportDir => ("Install directory", "インストール先ディレクトリ"),
-        Key::LabelImportTar => ("Source .tar path", "元 .tar パス"),
+        Key::LabelExportPath => ("Output file name", "出力ファイル名"),
+        Key::LabelImportNameOnly => ("New distro name", "新しいディストロ名"),
+        Key::LabelImportCustomArchive => ("Source archive path", "元アーカイブのパス"),
+        Key::PickImportTitle => (
+            " Import — pick an archive ",
+            " インポート — アーカイブを選択 ",
+        ),
+        Key::PickImportEmpty => (
+            "(no archives in exports\\ — press c for a custom path)",
+            "(exports\\ にアーカイブがありません — c で任意パス)",
+        ),
+        Key::PickImportHints => (
+            "↑/↓ move · Enter import · c custom · d delete · Esc back",
+            "↑/↓ 移動 · Enter 取込 · c 任意 · d 削除 · Esc 戻る",
+        ),
+        Key::ExportFormatHint => (
+            "Saved under exports\\; extension picks format (.tar/.tar.gz/.tar.xz/.vhdx)",
+            "exports\\ に保存。拡張子で形式選択 (.tar/.tar.gz/.tar.xz/.vhdx)",
+        ),
+        Key::PromptDeleteArchive => ("Delete archive '{}'?", "アーカイブ '{}' を削除しますか？"),
+        Key::DoneDeletedArchive => ("Deleted '{}'", "'{}' を削除しました"),
         Key::PromptTerminate => ("Terminate (stop) '{}'?", "'{}' を停止しますか？"),
         Key::PromptShutdown => (
             "Shut down ALL running WSL distributions?",
@@ -372,8 +400,8 @@ const HELP_EN: &str = "\
  X             shut down the whole WSL VM
  d             set as default
  u             unregister — delete (type name to confirm)
- e             export to a .tar backup
- m             import from a .tar
+ e             export to the managed folder
+ m             import (pick from the managed folder)
  i             install from the online catalog
  c / C         edit .wslconfig / wsl.conf
  L             toggle English / Japanese
@@ -393,8 +421,8 @@ const HELP_JA: &str = "\
  X             WSL VM 全体を停止
  d             既定に設定
  u             登録解除 — 削除 (名前入力で確認)
- e             .tar にエクスポート
- m             .tar からインポート
+ e             管理フォルダにエクスポート
+ m             インポート（管理フォルダから選択）
  i             オンライン一覧からインストール
  c / C         .wslconfig / wsl.conf を編集
  L             英語 / 日本語 切替

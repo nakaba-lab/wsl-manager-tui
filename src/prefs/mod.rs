@@ -67,6 +67,9 @@ pub struct Prefs {
     pub keybind_style: KeybindStyle,
     /// What `Enter` launches on the list.
     pub default_shell_launch: ShellLaunch,
+    /// Root folder for managed export archives and imported-distro vhdx.
+    /// `None` means the default (`%USERPROFILE%\wsl-manager`).
+    pub manage_dir: Option<PathBuf>,
 }
 
 impl Default for Prefs {
@@ -77,6 +80,7 @@ impl Default for Prefs {
             history_len: 60,
             keybind_style: KeybindStyle::Both,
             default_shell_launch: ShellLaunch::Inline,
+            manage_dir: None,
         }
     }
 }
@@ -90,6 +94,18 @@ impl Prefs {
     /// The polling interval, clamped to at least one second.
     pub fn poll_interval(&self) -> u64 {
         self.poll_interval_secs.max(1)
+    }
+
+    /// The effective managed-folder root (configured path, else
+    /// `%USERPROFILE%\wsl-manager`).
+    pub fn manage_dir(&self) -> PathBuf {
+        if let Some(dir) = &self.manage_dir {
+            return dir.clone();
+        }
+        let base = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        base.join("wsl-manager")
     }
 }
 
@@ -132,6 +148,7 @@ mod tests {
             history_len: 120,
             keybind_style: KeybindStyle::VimOnly,
             default_shell_launch: ShellLaunch::NewTab,
+            manage_dir: Some(PathBuf::from(r"C:\wsl")),
         };
         let text = toml::to_string_pretty(&prefs).unwrap();
         let parsed: Prefs = toml::from_str(&text).unwrap();
@@ -153,5 +170,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(prefs.effective_lang(), Lang::Ja);
+    }
+
+    #[test]
+    fn manage_dir_defaults_under_userprofile() {
+        let prefs = Prefs::default();
+        let dir = prefs.manage_dir();
+        assert!(dir.ends_with("wsl-manager"), "got {dir:?}");
+    }
+
+    #[test]
+    fn manage_dir_uses_configured_path() {
+        let prefs = Prefs {
+            manage_dir: Some(std::path::PathBuf::from(r"D:\wsl")),
+            ..Default::default()
+        };
+        assert_eq!(prefs.manage_dir(), std::path::PathBuf::from(r"D:\wsl"));
     }
 }

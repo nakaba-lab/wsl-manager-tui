@@ -39,6 +39,7 @@ pub async fn run(prefs: Prefs) -> Result<()> {
         keybind_style: prefs.keybind_style,
         default_shell_launch: prefs.default_shell_launch,
         metrics: metrics::MetricsHistory::new(prefs.history_len),
+        manage_dir: prefs.manage_dir(),
         ..Default::default()
     };
     let mut tui = Tui::new()?;
@@ -114,6 +115,67 @@ async fn event_loop(
                     prefs.lang = Some(model.lang);
                     let _ = crate::prefs::save(&prefs);
                 }
+                Command::OpenExportDialog { distro } => {
+                    let filename = crate::manage::export_filename(&distro, &local_timestamp());
+                    let _ = action_tx.send(Action::ExportDialogReady { distro, filename });
+                }
+                Command::ListExports => {
+                    let root = model.manage_dir.clone();
+                    let tx = action_tx.clone();
+                    tokio::spawn(async move {
+                        let entries = tokio::task::spawn_blocking(move || {
+                            crate::manage::list_exports(&root).unwrap_or_default()
+                        })
+                        .await
+                        .unwrap_or_default();
+                        let _ = tx.send(Action::ExportsListed(entries));
+                    });
+                }
+                Command::DeleteExport(path) => {
+                    let root = model.manage_dir.clone();
+                    let tx = action_tx.clone();
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    tokio::spawn(async move {
+                        let del = tokio::task::spawn_blocking({
+                            let path = path.clone();
+                            move || crate::manage::delete_export(&path)
+                        })
+                        .await;
+                        match del {
+                            Ok(Ok(())) => {
+                                let entries = tokio::task::spawn_blocking(move || {
+                                    crate::manage::list_exports(&root).unwrap_or_default()
+                                })
+                                .await
+                                .unwrap_or_default();
+                                let _ = tx.send(Action::ExportsListed(entries));
+                                let _ = tx.send(Action::OpDone(tf(
+                                    lang,
+                                    Key::DoneDeletedArchive,
+                                    &[&name],
+                                )));
+                            }
+                            Ok(Err(error)) => {
+                                let _ = tx.send(Action::OpFailed(tf(
+                                    lang,
+                                    Key::FailOp,
+                                    &[&error.to_string()],
+                                )));
+                            }
+                            Err(error) => {
+                                let _ = tx.send(Action::OpFailed(tf(
+                                    lang,
+                                    Key::FailOp,
+                                    &[&error.to_string()],
+                                )));
+                            }
+                        }
+                    });
+                }
                 spawnable => dispatch(spawnable, &backend, &action_tx, lang),
             }
         }
@@ -133,14 +195,27 @@ fn spawn_long_op(
     let tx = tx.clone();
     let task = tokio::spawn(async move {
         let (label, result) = match &command {
-            Command::Export { name, path } => (
-                tf(lang, Key::DoneExported, &[name]),
-                backend.export(name, path).await,
-            ),
-            Command::Import { name, dir, tar } => (
-                tf(lang, Key::DoneImported, &[name]),
-                backend.import(name, dir, tar).await,
-            ),
+            Command::Export { name, path, format } => {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                (
+                    tf(lang, Key::DoneExported, &[name]),
+                    backend.export(name, path, *format).await,
+                )
+            }
+            Command::Import {
+                name,
+                dir,
+                tar,
+                vhd,
+            } => {
+                let _ = std::fs::create_dir_all(dir);
+                (
+                    tf(lang, Key::DoneImported, &[name]),
+                    backend.import(name, dir, tar, *vhd).await,
+                )
+            }
             Command::Install { name } => (
                 tf(lang, Key::DoneInstalled, &[name]),
                 backend.install(name).await,
@@ -285,7 +360,10 @@ fn dispatch(
         | Command::Import { .. }
         | Command::Install { .. }
         | Command::CancelOp
-        | Command::SavePrefs => {}
+        | Command::SavePrefs
+        | Command::OpenExportDialog { .. }
+        | Command::ListExports
+        | Command::DeleteExport(_) => {}
     }
 }
 
@@ -319,6 +397,19 @@ async fn run_lifecycle(backend: &dyn WslBackend, op: LifecycleOp, lang: Lang) ->
         Ok(()) => Action::OpDone(op.done_message(lang)),
         Err(error) => Action::OpFailed(tf(lang, Key::FailOp, &[&error.to_string()])),
     }
+}
+
+/// Current local time as `YYYYMMDD-HHMMSS` via the Win32 `GetLocalTime` API
+/// (no timezone-database dependency).
+fn local_timestamp() -> String {
+    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    // SAFETY: GetLocalTime fills a caller-owned SYSTEMTIME; zeroed is valid input.
+    let mut st: windows_sys::Win32::Foundation::SYSTEMTIME = unsafe { std::mem::zeroed() };
+    unsafe { GetLocalTime(&mut st) };
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond
+    )
 }
 
 /// Translate a crossterm event into an [`Action`], dropping anything the app
@@ -414,11 +505,16 @@ mod tests {
         async fn list_online(&self) -> Result<Vec<OnlineDistro>> {
             Ok(vec![])
         }
-        async fn export(&self, name: &str, _path: &Path) -> Result<()> {
-            self.record(format!("export {name}"))
+        async fn export(
+            &self,
+            name: &str,
+            _path: &Path,
+            format: crate::manage::ExportFormat,
+        ) -> Result<()> {
+            self.record(format!("export {name} {format:?}"))
         }
-        async fn import(&self, name: &str, _dir: &Path, _tar: &Path) -> Result<()> {
-            self.record(format!("import {name}"))
+        async fn import(&self, name: &str, _dir: &Path, _tar: &Path, vhd: bool) -> Result<()> {
+            self.record(format!("import {name} vhd={vhd}"))
         }
         async fn install(&self, name: &str) -> Result<()> {
             self.record(format!("install {name}"))

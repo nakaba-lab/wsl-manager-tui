@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use super::input::{KeyCode, KeyMods as KeyModifiers, KeyPress as KeyEvent};
 use super::{
     Action, Command, ConfigEditState, Confirm, EditMode, Event, FormKind, FormState,
-    InstallPickState, LifecycleOp, Modal, Model, ProgressState, TypedConfirm,
+    ImportPickState, InstallPickState, LifecycleOp, Modal, Model, ProgressState, TypedConfirm,
 };
 use crate::config::ConfigTarget;
 use crate::i18n::{t, tf, Key};
@@ -57,6 +57,14 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
         }
         Action::OnlineList(items) => {
             model.modal = Some(Modal::InstallPick(InstallPickState::new(items)));
+            vec![]
+        }
+        Action::ExportDialogReady { distro, filename } => {
+            model.modal = Some(Modal::Form(FormState::export(distro, filename)));
+            vec![]
+        }
+        Action::ExportsListed(entries) => {
+            model.modal = Some(Modal::ImportPick(ImportPickState::new(entries)));
             vec![]
         }
         Action::ConfigLoaded { target, content } => {
@@ -154,8 +162,8 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         (KeyCode::Char('x'), _) => open_confirm_terminate(model),
         (KeyCode::Char('X'), _) => open_confirm_shutdown(model),
         (KeyCode::Char('u'), _) => open_confirm_unregister(model),
-        (KeyCode::Char('e'), _) => open_export_form(model),
-        (KeyCode::Char('m'), _) => open_import_form(model),
+        (KeyCode::Char('e'), _) => return open_export(model),
+        (KeyCode::Char('m'), _) => return vec![Command::ListExports],
         (KeyCode::Char('i'), _) => {
             model.status = Some(t(model.lang, Key::StatusFetching).to_string());
             return vec![Command::ListOnline];
@@ -171,16 +179,11 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
     vec![]
 }
 
-fn open_export_form(model: &mut Model) {
-    let Some(name) = selected_name(model) else {
-        return;
+fn open_export(model: &mut Model) -> Vec<Command> {
+    let Some(distro) = selected_name(model) else {
+        return vec![];
     };
-    let default_path = format!("{name}.tar");
-    model.modal = Some(Modal::Form(FormState::export(name, default_path)));
-}
-
-fn open_import_form(model: &mut Model) {
-    model.modal = Some(Modal::Form(FormState::import()));
+    vec![Command::OpenExportDialog { distro }]
 }
 
 fn load_config(model: &mut Model, target: ConfigTarget) -> Vec<Command> {
@@ -590,78 +593,165 @@ mod tests {
     }
 
     #[test]
-    fn e_opens_export_form() {
+    fn e_opens_export_dialog_command() {
         let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('e'));
-        assert!(matches!(m.modal, Some(Modal::Form(_))));
+        let cmds = update(&mut m, ch('e'));
+        assert_eq!(
+            cmds,
+            vec![Command::OpenExportDialog {
+                distro: "Debian".into()
+            }]
+        );
+        assert!(m.modal.is_none(), "form opens only after ExportDialogReady");
     }
 
     #[test]
-    fn export_form_submit_dispatches_and_shows_progress() {
+    fn export_dialog_ready_opens_form() {
         let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('e'));
+        update(
+            &mut m,
+            Action::ExportDialogReady {
+                distro: "Debian".into(),
+                filename: "Debian-20260607-153012.tar".into(),
+            },
+        );
+        match &m.modal {
+            Some(Modal::Form(form)) => assert_eq!(form.value(0), "Debian-20260607-153012.tar"),
+            other => panic!("expected export form, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn m_requests_export_listing() {
+        let mut m = model_with(&["Debian"]);
+        assert_eq!(update(&mut m, ch('m')), vec![Command::ListExports]);
+    }
+
+    #[test]
+    fn exports_listed_opens_picker() {
+        use crate::manage::Archive;
+        let mut m = Model::default();
+        update(
+            &mut m,
+            Action::ExportsListed(vec![Archive {
+                name: "Ubuntu.tar".into(),
+                path: std::path::PathBuf::from(r"C:\wsl\exports\Ubuntu.tar"),
+                size: 10,
+            }]),
+        );
+        assert!(matches!(m.modal, Some(Modal::ImportPick(_))));
+    }
+
+    fn archive(name: &str) -> crate::manage::Archive {
+        crate::manage::Archive {
+            name: name.into(),
+            path: std::path::PathBuf::from(format!(r"C:\wsl\exports\{name}")),
+            size: 1,
+        }
+    }
+
+    fn open_picker(names: &[&str]) -> Model {
+        let mut m = model_with(&["Debian"]);
+        m.manage_dir = std::path::PathBuf::from(r"C:\wsl");
+        update(
+            &mut m,
+            Action::ExportsListed(names.iter().map(|n| archive(n)).collect()),
+        );
+        m
+    }
+
+    #[test]
+    fn export_submit_builds_managed_path_and_format() {
+        let mut m = model_with(&["Debian"]);
+        m.manage_dir = std::path::PathBuf::from(r"C:\wsl");
+        update(
+            &mut m,
+            Action::ExportDialogReady {
+                distro: "Debian".into(),
+                filename: "Debian.tar.gz".into(),
+            },
+        );
         let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
             cmds,
             vec![Command::Export {
                 name: "Debian".into(),
-                path: PathBuf::from("Debian.tar"),
+                path: std::path::PathBuf::from(r"C:\wsl\exports\Debian.tar.gz"),
+                format: crate::manage::ExportFormat::TarGz,
             }]
         );
         assert!(matches!(m.modal, Some(Modal::Progress(_))));
     }
 
     #[test]
-    fn import_form_requires_all_fields() {
-        let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('m'));
-        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(cmds.is_empty());
-        assert!(matches!(m.modal, Some(Modal::Form(_))));
+    fn picker_enter_opens_name_form_prefilled() {
+        let mut m = open_picker(&["Ubuntu-20260607.tar.gz"]);
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        match &m.modal {
+            Some(Modal::Form(form)) => assert_eq!(form.value(0), "Ubuntu-20260607"),
+            other => panic!("expected import name form, got {other:?}"),
+        }
     }
 
     #[test]
-    fn import_existing_name_asks_to_overwrite() {
-        let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('m')); // import form
-        let fill = |m: &mut Model, text: &str| {
-            for c in text.chars() {
-                update(m, ch(c));
-            }
-        };
-        fill(&mut m, "Debian"); // name (collides with existing)
-        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
-        fill(&mut m, "C:/wsl/dir");
-        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
-        fill(&mut m, "C:/backup.tar");
-        // Submit: collision -> overwrite confirmation, no command yet.
-        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(cmds.is_empty(), "should confirm before overwriting");
+    fn picker_import_dispatches_with_managed_dir_and_vhd_flag() {
+        let mut m = open_picker(&["box.vhdx"]);
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE)); // -> name form ("box")
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE)); // submit
+        assert_eq!(
+            cmds,
+            vec![Command::Import {
+                name: "box".into(),
+                dir: std::path::PathBuf::from(r"C:\wsl\installed\box"),
+                tar: std::path::PathBuf::from(r"C:\wsl\exports\box.vhdx"),
+                vhd: true,
+            }]
+        );
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
+    }
+
+    #[test]
+    fn picker_d_asks_to_delete() {
+        let mut m = open_picker(&["old.tar"]);
+        let cmds = update(&mut m, ch('d'));
+        assert!(cmds.is_empty(), "delete is confirmed first");
         assert!(matches!(m.modal, Some(Modal::Confirm(_))));
-        // Confirm -> Import dispatched and a progress dialog opens.
+        let cmds = update(&mut m, ch('y'));
+        assert_eq!(
+            cmds,
+            vec![Command::DeleteExport(std::path::PathBuf::from(
+                r"C:\wsl\exports\old.tar"
+            ))]
+        );
+    }
+
+    #[test]
+    fn picker_c_opens_custom_form() {
+        let mut m = open_picker(&["a.tar"]);
+        update(&mut m, ch('c'));
+        match &m.modal {
+            Some(Modal::Form(form)) => assert_eq!(form.fields.len(), 2),
+            other => panic!("expected custom import form, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn picker_esc_closes() {
+        let mut m = open_picker(&["a.tar"]);
+        let cmds = update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(cmds.is_empty());
+        assert!(m.modal.is_none());
+    }
+
+    #[test]
+    fn import_existing_name_asks_overwrite() {
+        let mut m = open_picker(&["Debian.tar"]); // model_with(["Debian"]) already exists
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE)); // name form prefilled "Debian"
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(cmds.is_empty(), "must confirm overwrite");
+        assert!(matches!(m.modal, Some(Modal::Confirm(_))));
         let cmds = update(&mut m, ch('y'));
         assert!(matches!(cmds.as_slice(), [Command::Import { .. }]));
-        assert!(matches!(m.modal, Some(Modal::Progress(_))));
-    }
-
-    #[test]
-    fn import_new_name_skips_overwrite_confirm() {
-        let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('m'));
-        for c in "Fresh".chars() {
-            update(&mut m, ch(c));
-        }
-        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
-        for c in "C:/d".chars() {
-            update(&mut m, ch(c));
-        }
-        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
-        for c in "C:/t.tar".chars() {
-            update(&mut m, ch(c));
-        }
-        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(cmds.as_slice(), [Command::Import { .. }]));
-        assert!(matches!(m.modal, Some(Modal::Progress(_))));
     }
 
     #[test]
@@ -702,11 +792,23 @@ mod tests {
         assert!(matches!(m.modal, Some(Modal::Progress(_))));
     }
 
+    /// Open a Progress modal by driving the managed export flow to submit.
+    fn open_progress_via_export(m: &mut Model) {
+        m.manage_dir = std::path::PathBuf::from(r"C:\wsl");
+        update(
+            m,
+            Action::ExportDialogReady {
+                distro: "Debian".into(),
+                filename: "Debian.tar".into(),
+            },
+        );
+        update(m, key(KeyCode::Enter, KeyModifiers::NONE));
+    }
+
     #[test]
     fn progress_esc_cancels() {
         let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('e'));
-        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        open_progress_via_export(&mut m);
         assert!(matches!(m.modal, Some(Modal::Progress(_))));
         let cmds = update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(cmds, vec![Command::CancelOp]);
@@ -716,8 +818,7 @@ mod tests {
     #[test]
     fn op_done_closes_progress_modal() {
         let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('e'));
-        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        open_progress_via_export(&mut m);
         let cmds = update(&mut m, Action::OpDone("Exported Debian".into()));
         assert!(m.modal.is_none());
         assert!(cmds.contains(&Command::RefreshList));
@@ -726,8 +827,7 @@ mod tests {
     #[test]
     fn frame_advances_progress_spinner() {
         let mut m = model_with(&["Debian"]);
-        update(&mut m, ch('e'));
-        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        open_progress_via_export(&mut m);
         let before = match &m.modal {
             Some(Modal::Progress(p)) => p.frame,
             _ => panic!("expected progress modal"),
@@ -879,5 +979,44 @@ mod tests {
         // A later refresh (fresh list) keeps the cached value.
         update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
         assert_eq!(m.distros[0].inner_disk, Some((10, 100)));
+    }
+
+    #[test]
+    fn picker_navigation_moves_selection() {
+        let mut m = open_picker(&["a.tar", "b.tar"]);
+        update(&mut m, key(KeyCode::Down, KeyModifiers::NONE));
+        match &m.modal {
+            Some(Modal::ImportPick(p)) => assert_eq!(p.selected, 1),
+            other => panic!("expected picker, got {other:?}"),
+        }
+        update(&mut m, ch('k'));
+        match &m.modal {
+            Some(Modal::ImportPick(p)) => assert_eq!(p.selected, 0),
+            other => panic!("expected picker, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_import_submit_uses_typed_path_and_managed_dir() {
+        let mut m = open_picker(&["a.tar"]);
+        update(&mut m, ch('c')); // open custom form: field 0 = archive path, field 1 = name
+        for c in r"D:\dl\thing.tar.gz".chars() {
+            update(&mut m, ch(c));
+        }
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "Imported".chars() {
+            update(&mut m, ch(c));
+        }
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            cmds,
+            vec![Command::Import {
+                name: "Imported".into(),
+                dir: std::path::PathBuf::from(r"C:\wsl\installed\Imported"),
+                tar: std::path::PathBuf::from(r"D:\dl\thing.tar.gz"),
+                vhd: false,
+            }]
+        );
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
     }
 }

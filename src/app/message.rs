@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::input::KeyPress;
 use crate::config::ConfigTarget;
 use crate::i18n::{tf, Key, Lang};
+use crate::manage::{Archive, ExportFormat};
 use crate::metrics::MetricsSample;
 use crate::wsl::{Distro, OnlineDistro};
 
@@ -46,6 +47,15 @@ pub enum Action {
     },
     /// The list of installable distributions arrived.
     OnlineList(Vec<OnlineDistro>),
+    /// The runtime computed the default export filename; open the export form.
+    ExportDialogReady {
+        /// The distro to export.
+        distro: String,
+        /// The default (editable) filename.
+        filename: String,
+    },
+    /// The managed `exports\` listing arrived.
+    ExportsListed(Vec<Archive>),
     /// A configuration file was loaded for editing.
     ConfigLoaded {
         /// Which file was loaded.
@@ -80,22 +90,35 @@ pub enum Command {
     LaunchTabShell(String),
     /// Fetch the list of installable distributions.
     ListOnline,
-    /// Export a distro to a tar file.
+    /// Export a distro to an archive file.
     Export {
         /// The distro to export.
         name: String,
-        /// Destination tar path.
+        /// Destination archive path (under the managed `exports\`).
         path: PathBuf,
+        /// Archive format (derived from the filename extension).
+        format: ExportFormat,
     },
-    /// Import a distro from a tar file.
+    /// Import a distro from an archive file.
     Import {
         /// New distro name.
         name: String,
-        /// Install directory.
+        /// Install directory (managed `installed\<name>\`).
         dir: PathBuf,
-        /// Source tar path.
+        /// Source archive path.
         tar: PathBuf,
+        /// Whether the source is a `.vhd(x)` (adds `--vhd`).
+        vhd: bool,
     },
+    /// Build the timestamped default export filename and open the export dialog.
+    OpenExportDialog {
+        /// The distro to export.
+        distro: String,
+    },
+    /// List archives in the managed `exports\` folder.
+    ListExports,
+    /// Delete a managed archive, then re-list.
+    DeleteExport(PathBuf),
     /// Install a distro from the online catalog.
     Install {
         /// The install id.

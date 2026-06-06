@@ -3,6 +3,7 @@
 use super::config_edit::ConfigEditState;
 use super::message::Command;
 use crate::i18n::Key;
+use crate::manage::Archive;
 use crate::wsl::OnlineDistro;
 
 /// An overlay dialog on top of the main list.
@@ -21,6 +22,8 @@ pub enum Modal {
     Progress(ProgressState),
     /// A filterable picker of installable distributions.
     InstallPick(InstallPickState),
+    /// A picker of managed export archives to import.
+    ImportPick(ImportPickState),
     /// The configuration editor (`.wslconfig` / `wsl.conf`).
     ConfigEdit(ConfigEditState),
     /// The keybinding help overlay.
@@ -90,13 +93,18 @@ impl TextField {
 /// Which form is being shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormKind {
-    /// Export the named distro.
+    /// Export the named distro (one field: the output filename).
     Export {
         /// The distro being exported.
         distro: String,
     },
-    /// Import a new distro.
-    Import,
+    /// Import the chosen archive (one field: the new distro name).
+    ImportName {
+        /// The selected archive path.
+        tar: std::path::PathBuf,
+    },
+    /// Import a custom archive (fields: archive path, new distro name).
+    ImportCustom,
 }
 
 /// State for a multi-field text form.
@@ -123,20 +131,22 @@ impl FormState {
         }
     }
 
-    /// An import form (name, install directory, source tar).
-    pub fn import() -> Self {
+    /// An import form for a picked archive: just the new distro name.
+    pub fn import_name(tar: std::path::PathBuf, default_name: String) -> Self {
         Self {
-            kind: FormKind::Import,
-            labels: vec![
-                Key::LabelImportName,
-                Key::LabelImportDir,
-                Key::LabelImportTar,
-            ],
-            fields: vec![
-                TextField::default(),
-                TextField::default(),
-                TextField::default(),
-            ],
+            kind: FormKind::ImportName { tar },
+            labels: vec![Key::LabelImportNameOnly],
+            fields: vec![TextField::new(default_name)],
+            focus: 0,
+        }
+    }
+
+    /// An import form for a custom archive path plus the new distro name.
+    pub fn import_custom() -> Self {
+        Self {
+            kind: FormKind::ImportCustom,
+            labels: vec![Key::LabelImportCustomArchive, Key::LabelImportNameOnly],
+            fields: vec![TextField::default(), TextField::default()],
             focus: 0,
         }
     }
@@ -253,5 +263,41 @@ impl InstallPickState {
     pub fn pop_filter(&mut self) {
         self.filter.pop();
         self.selected = 0;
+    }
+}
+
+/// State for the managed-archive import picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportPickState {
+    /// Archives found in the managed `exports\` folder (newest-first).
+    pub entries: Vec<Archive>,
+    /// Selected index.
+    pub selected: usize,
+}
+
+impl ImportPickState {
+    /// A picker over `entries`.
+    pub fn new(entries: Vec<Archive>) -> Self {
+        Self {
+            entries,
+            selected: 0,
+        }
+    }
+
+    /// Move selection down (clamped).
+    pub fn select_next(&mut self) {
+        if !self.entries.is_empty() {
+            self.selected = (self.selected + 1).min(self.entries.len() - 1);
+        }
+    }
+
+    /// Move selection up (clamped).
+    pub fn select_prev(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    /// The selected archive, if any.
+    pub fn selected_entry(&self) -> Option<&Archive> {
+        self.entries.get(self.selected)
     }
 }
