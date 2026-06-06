@@ -2,6 +2,8 @@
 //! plus a thin filesystem layer (listing/deleting archives). Terminal-/clock-
 //! independent so it can be unit-tested headlessly; the runtime performs the IO.
 
+use std::cmp::Reverse;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// The export archive formats `wsl --export` can produce.
@@ -137,9 +139,6 @@ pub fn derive_distro_name(archive_filename: &str) -> String {
         .unwrap_or(archive_filename);
     sanitize_name(stem)
 }
-
-use std::cmp::Reverse;
-use std::io;
 
 /// An export archive on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
