@@ -2,9 +2,14 @@
 //! IO-free, so it is unit-tested headlessly. Side effects are described by the
 //! returned [`Command`]s, which the runtime executes.
 
+use std::path::PathBuf;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{Action, Command, Confirm, Event, LifecycleOp, Modal, Model, TypedConfirm};
+use super::{
+    Action, Command, Confirm, Event, FormKind, FormState, InstallPickState, LifecycleOp, Modal,
+    Model, ProgressState, TypedConfirm,
+};
 
 /// Advance the model in response to an action, returning any side effects.
 pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
@@ -29,7 +34,14 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
             model.metrics.push(&sample);
             vec![]
         }
+        Action::OnlineList(items) => {
+            model.modal = Some(Modal::InstallPick(InstallPickState::new(items)));
+            vec![]
+        }
         Action::OpDone(message) => {
+            if matches!(model.modal, Some(Modal::Progress(_))) {
+                model.modal = None;
+            }
             model.status = Some(message);
             vec![Command::RefreshList]
         }
@@ -47,6 +59,12 @@ fn update_event(model: &mut Model, event: Event) -> Vec<Command> {
         Event::Tick => {
             model.ticks = model.ticks.wrapping_add(1);
             vec![Command::RefreshList, Command::SampleMetrics]
+        }
+        Event::Frame => {
+            if let Some(Modal::Progress(progress)) = &mut model.modal {
+                progress.tick();
+            }
+            vec![]
         }
         Event::Resize(_, _) => vec![],
     }
@@ -77,9 +95,27 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         (KeyCode::Char('x'), _) => open_confirm_terminate(model),
         (KeyCode::Char('X'), _) => open_confirm_shutdown(model),
         (KeyCode::Char('u'), _) => open_confirm_unregister(model),
+        (KeyCode::Char('e'), _) => open_export_form(model),
+        (KeyCode::Char('m'), _) => open_import_form(model),
+        (KeyCode::Char('i'), _) => {
+            model.status = Some("Fetching available distributions…".to_string());
+            return vec![Command::ListOnline];
+        }
         _ => {}
     }
     vec![]
+}
+
+fn open_export_form(model: &mut Model) {
+    let Some(name) = selected_name(model) else {
+        return;
+    };
+    let default_path = format!("{name}.tar");
+    model.modal = Some(Modal::Form(FormState::export(name, default_path)));
+}
+
+fn open_import_form(model: &mut Model) {
+    model.modal = Some(Modal::Form(FormState::import()));
 }
 
 fn selected_name(model: &Model) -> Option<String> {
@@ -158,6 +194,9 @@ fn handle_modal_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         // Any key dismisses an error (the modal was already taken above).
         Modal::Error { .. } => vec![],
         Modal::Confirm(confirm) => handle_confirm_key(model, confirm, key),
+        Modal::Form(form) => handle_form_key(model, form, key),
+        Modal::Progress(progress) => handle_progress_key(model, progress, key),
+        Modal::InstallPick(pick) => handle_install_key(model, pick, key),
     }
 }
 
@@ -209,6 +248,132 @@ fn handle_confirm_key(model: &mut Model, mut confirm: Confirm, key: KeyEvent) ->
 fn confirm_op(model: &mut Model, op: LifecycleOp) -> Vec<Command> {
     model.status = Some(format!("{}…", op.verb()));
     vec![Command::Lifecycle(op)]
+}
+
+fn handle_form_key(model: &mut Model, mut form: FormState, key: KeyEvent) -> Vec<Command> {
+    match key.code {
+        KeyCode::Esc => vec![], // cancelled (modal already taken)
+        KeyCode::Tab | KeyCode::Down => {
+            form.focus_next();
+            model.modal = Some(Modal::Form(form));
+            vec![]
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            form.focus_prev();
+            model.modal = Some(Modal::Form(form));
+            vec![]
+        }
+        KeyCode::Enter => submit_form(model, form),
+        KeyCode::Char(c) => {
+            form.current_mut().insert(c);
+            model.modal = Some(Modal::Form(form));
+            vec![]
+        }
+        KeyCode::Backspace => {
+            form.current_mut().backspace();
+            model.modal = Some(Modal::Form(form));
+            vec![]
+        }
+        _ => {
+            model.modal = Some(Modal::Form(form));
+            vec![]
+        }
+    }
+}
+
+fn submit_form(model: &mut Model, form: FormState) -> Vec<Command> {
+    match form.kind.clone() {
+        FormKind::Export { distro } => {
+            let path = form.value(0).trim().to_string();
+            if path.is_empty() {
+                model.modal = Some(Modal::Form(form));
+                return vec![];
+            }
+            model.modal = Some(Modal::Progress(ProgressState::new(format!(
+                "Exporting '{distro}'"
+            ))));
+            vec![Command::Export {
+                name: distro,
+                path: PathBuf::from(path),
+            }]
+        }
+        FormKind::Import => {
+            let name = form.value(0).trim().to_string();
+            let dir = form.value(1).trim().to_string();
+            let tar = form.value(2).trim().to_string();
+            if name.is_empty() || dir.is_empty() || tar.is_empty() {
+                model.modal = Some(Modal::Form(form));
+                return vec![];
+            }
+            model.modal = Some(Modal::Progress(ProgressState::new(format!(
+                "Importing '{name}'"
+            ))));
+            vec![Command::Import {
+                name,
+                dir: PathBuf::from(dir),
+                tar: PathBuf::from(tar),
+            }]
+        }
+    }
+}
+
+fn handle_progress_key(model: &mut Model, progress: ProgressState, key: KeyEvent) -> Vec<Command> {
+    match key.code {
+        // Cancel: close the dialog and ask the runtime to abort the task.
+        KeyCode::Esc => {
+            model.status = Some("Cancelling…".to_string());
+            vec![Command::CancelOp]
+        }
+        _ => {
+            model.modal = Some(Modal::Progress(progress));
+            vec![]
+        }
+    }
+}
+
+fn handle_install_key(
+    model: &mut Model,
+    mut pick: InstallPickState,
+    key: KeyEvent,
+) -> Vec<Command> {
+    match key.code {
+        KeyCode::Esc => vec![], // cancelled
+        KeyCode::Down => {
+            pick.select_next();
+            model.modal = Some(Modal::InstallPick(pick));
+            vec![]
+        }
+        KeyCode::Up => {
+            pick.select_prev();
+            model.modal = Some(Modal::InstallPick(pick));
+            vec![]
+        }
+        KeyCode::Enter => {
+            if let Some(name) = pick.selected_name() {
+                model.modal = Some(Modal::Progress(ProgressState::new(format!(
+                    "Installing '{name}'"
+                ))));
+                vec![Command::Install { name }]
+            } else {
+                model.modal = Some(Modal::InstallPick(pick));
+                vec![]
+            }
+        }
+        KeyCode::Char(c) => {
+            pick.push_filter(c);
+            model.modal = Some(Modal::InstallPick(pick));
+            vec![]
+        }
+        KeyCode::Backspace => {
+            pick.pop_filter();
+            model.modal = Some(Modal::InstallPick(pick));
+            vec![]
+        }
+        _ => {
+            model.modal = Some(Modal::InstallPick(pick));
+            vec![]
+        }
+    }
 }
 
 #[cfg(test)]
@@ -440,5 +605,119 @@ mod tests {
         let mut m = Model::default();
         let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(cmds.is_empty());
+    }
+
+    fn online(name: &str, friendly: &str) -> crate::wsl::OnlineDistro {
+        crate::wsl::OnlineDistro {
+            name: name.to_string(),
+            friendly: friendly.to_string(),
+        }
+    }
+
+    #[test]
+    fn e_opens_export_form() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('e'));
+        assert!(matches!(m.modal, Some(Modal::Form(_))));
+    }
+
+    #[test]
+    fn export_form_submit_dispatches_and_shows_progress() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('e'));
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            cmds,
+            vec![Command::Export {
+                name: "Debian".into(),
+                path: PathBuf::from("Debian.tar"),
+            }]
+        );
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
+    }
+
+    #[test]
+    fn import_form_requires_all_fields() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('m'));
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(cmds.is_empty());
+        assert!(matches!(m.modal, Some(Modal::Form(_))));
+    }
+
+    #[test]
+    fn i_requests_online_list() {
+        let mut m = model_with(&["Debian"]);
+        let cmds = update(&mut m, ch('i'));
+        assert_eq!(cmds, vec![Command::ListOnline]);
+    }
+
+    #[test]
+    fn online_list_opens_install_pick() {
+        let mut m = Model::default();
+        update(
+            &mut m,
+            Action::OnlineList(vec![online("Ubuntu", "Ubuntu"), online("Debian", "Debian")]),
+        );
+        assert!(matches!(m.modal, Some(Modal::InstallPick(_))));
+    }
+
+    #[test]
+    fn install_pick_filters_and_installs() {
+        let mut m = Model::default();
+        update(
+            &mut m,
+            Action::OnlineList(vec![
+                online("Ubuntu", "Ubuntu"),
+                online("Debian", "Debian GNU/Linux"),
+            ]),
+        );
+        update(&mut m, ch('D')); // filter to Debian
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            cmds,
+            vec![Command::Install {
+                name: "Debian".into()
+            }]
+        );
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
+    }
+
+    #[test]
+    fn progress_esc_cancels() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('e'));
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(m.modal, Some(Modal::Progress(_))));
+        let cmds = update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(cmds, vec![Command::CancelOp]);
+        assert!(m.modal.is_none());
+    }
+
+    #[test]
+    fn op_done_closes_progress_modal() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('e'));
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        let cmds = update(&mut m, Action::OpDone("Exported Debian".into()));
+        assert!(m.modal.is_none());
+        assert!(cmds.contains(&Command::RefreshList));
+    }
+
+    #[test]
+    fn frame_advances_progress_spinner() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, ch('e'));
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        let before = match &m.modal {
+            Some(Modal::Progress(p)) => p.frame,
+            _ => panic!("expected progress modal"),
+        };
+        update(&mut m, Action::Event(Event::Frame));
+        let after = match &m.modal {
+            Some(Modal::Progress(p)) => p.frame,
+            _ => panic!("expected progress modal"),
+        };
+        assert_eq!(after, before + 1);
     }
 }

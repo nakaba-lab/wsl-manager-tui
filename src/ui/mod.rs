@@ -1,15 +1,17 @@
 //! View layer: pure rendering of the [`Model`] into ratatui widgets. Renders
-//! only; never mutates state. (M3: distro table, status line, and confirm/error
-//! modals; the detail pane and other modals arrive in later milestones.)
+//! only; never mutates state. Covers the distro table, the detail pane with a
+//! VM-memory sparkline, the status line, and all modals (confirm, error, form,
+//! progress, install picker).
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, Paragraph, Row, Sparkline, Table, TableState, Wrap,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Sparkline, Table,
+    TableState, Wrap,
 };
 use ratatui::Frame;
 
-use crate::app::{Confirm, Modal, Model};
+use crate::app::{Confirm, FormKind, FormState, InstallPickState, Modal, Model, ProgressState};
 use crate::metrics::MetricsHistory;
 use crate::wsl::{Distro, DistroState};
 
@@ -162,7 +164,87 @@ fn render_modal(f: &mut Frame, modal: &Modal, area: Rect) {
     match modal {
         Modal::Confirm(confirm) => render_confirm(f, confirm, area),
         Modal::Error { message } => render_error(f, message, area),
+        Modal::Form(form) => render_form(f, form, area),
+        Modal::Progress(progress) => render_progress(f, progress, area),
+        Modal::InstallPick(pick) => render_install_pick(f, pick, area),
     }
+}
+
+fn render_form(f: &mut Frame, form: &FormState, area: Rect) {
+    let title = match &form.kind {
+        FormKind::Export { .. } => " Export distribution ",
+        FormKind::Import => " Import distribution ",
+    };
+    let popup = centered_rect(72, form.fields.len() as u16 * 2 + 5, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let mut text = String::new();
+    for (i, label) in form.labels.iter().enumerate() {
+        let marker = if i == form.focus { "▶ " } else { "  " };
+        let cursor = if i == form.focus { "▏" } else { "" };
+        text.push_str(&format!(
+            "{marker}{label}:\n    {}{cursor}\n",
+            form.fields[i].value
+        ));
+    }
+    text.push_str("\nTab / ↑↓: move · Enter: submit · Esc: cancel");
+    f.render_widget(Paragraph::new(text), inner);
+}
+
+fn render_progress(f: &mut Frame, progress: &ProgressState, area: Rect) {
+    let popup = centered_rect(60, 5, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Working ")
+        .border_style(Style::default().fg(Color::Cyan));
+    let text = format!(
+        "{} {}…\n\nThis may take a while. Esc to cancel.",
+        progress.spinner(),
+        progress.title
+    );
+    f.render_widget(Paragraph::new(text).block(block), popup);
+}
+
+fn render_install_pick(f: &mut Frame, pick: &InstallPickState, area: Rect) {
+    let popup = centered_rect(74, 22, area);
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Install — select a distribution ");
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    f.render_widget(Paragraph::new(format!("filter: {}", pick.filter)), rows[0]);
+
+    let filtered = pick.filtered();
+    let items: Vec<ListItem> = filtered
+        .iter()
+        .map(|distro| ListItem::new(format!("{:<24} {}", distro.name, distro.friendly)))
+        .collect();
+    let list = List::new(items)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_symbol("▶ ");
+    let mut state = ListState::default();
+    if !filtered.is_empty() {
+        state.select(Some(pick.selected.min(filtered.len() - 1)));
+    }
+    f.render_stateful_widget(list, rows[1], &mut state);
+
+    f.render_widget(
+        Paragraph::new("type to filter · ↑/↓ select · Enter install · Esc cancel"),
+        rows[2],
+    );
 }
 
 fn render_confirm(f: &mut Frame, confirm: &Confirm, area: Rect) {
@@ -314,6 +396,52 @@ mod tests {
         assert!(rendered.contains("Detail: Debian"), "detail title missing");
         assert!(rendered.contains("VM Mem"), "vm memory line missing");
         assert!(rendered.contains("2.0 GB"), "vm memory value missing");
+    }
+
+    #[test]
+    fn renders_export_form_modal() {
+        use crate::app::FormState;
+        let mut model = sample();
+        model.modal = Some(Modal::Form(FormState::export(
+            "Debian".to_string(),
+            "Debian.tar".to_string(),
+        )));
+        let rendered = render(&model, 110, 24);
+        assert!(rendered.contains("Export"), "form title missing");
+        assert!(rendered.contains("Debian.tar"), "default path missing");
+    }
+
+    #[test]
+    fn renders_progress_modal() {
+        use crate::app::ProgressState;
+        let mut model = sample();
+        model.modal = Some(Modal::Progress(ProgressState::new(
+            "Exporting 'Debian'".to_string(),
+        )));
+        let rendered = render(&model, 110, 24);
+        assert!(rendered.contains("Working"), "progress title missing");
+        assert!(rendered.contains("Exporting 'Debian'"), "op label missing");
+    }
+
+    #[test]
+    fn renders_install_pick_modal() {
+        use crate::app::InstallPickState;
+        use crate::wsl::OnlineDistro;
+        let mut model = sample();
+        model.modal = Some(Modal::InstallPick(InstallPickState::new(vec![
+            OnlineDistro {
+                name: "Ubuntu".to_string(),
+                friendly: "Ubuntu".to_string(),
+            },
+            OnlineDistro {
+                name: "Debian".to_string(),
+                friendly: "Debian GNU/Linux".to_string(),
+            },
+        ])));
+        let rendered = render(&model, 110, 28);
+        assert!(rendered.contains("Install"), "picker title missing");
+        assert!(rendered.contains("Ubuntu"), "Ubuntu missing");
+        assert!(rendered.contains("Debian"), "Debian missing");
     }
 
     #[test]

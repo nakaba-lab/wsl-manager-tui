@@ -4,10 +4,12 @@
 //! [`Action`] is what the [`crate::app::update`] reducer consumes. [`Command`]s
 //! returned by `update` describe side effects the runtime then executes.
 
+use std::path::PathBuf;
+
 use crossterm::event::KeyEvent;
 
 use crate::metrics::MetricsSample;
-use crate::wsl::Distro;
+use crate::wsl::{Distro, OnlineDistro};
 
 /// Low-level input delivered by the runtime to the application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,8 +19,10 @@ pub enum Event {
     Key(KeyEvent),
     /// Terminal was resized to (width, height) columns/rows.
     Resize(u16, u16),
-    /// Periodic timer tick. Drives polling and animations.
+    /// Periodic timer tick. Drives list/metrics polling.
     Tick,
+    /// Fast animation tick. Drives spinner animation (no polling).
+    Frame,
 }
 
 /// A message consumed by [`crate::app::update`] to advance the model.
@@ -32,6 +36,8 @@ pub enum Action {
     RefreshFailed(String),
     /// A resource sample was taken.
     MetricsSampled(MetricsSample),
+    /// The list of installable distributions arrived.
+    OnlineList(Vec<OnlineDistro>),
     /// A lifecycle operation finished successfully (carries a status message).
     OpDone(String),
     /// A lifecycle operation failed (carries an error message).
@@ -55,6 +61,31 @@ pub enum Command {
     LaunchInlineShell(String),
     /// Open an interactive shell in a new Windows Terminal tab.
     LaunchTabShell(String),
+    /// Fetch the list of installable distributions.
+    ListOnline,
+    /// Export a distro to a tar file.
+    Export {
+        /// The distro to export.
+        name: String,
+        /// Destination tar path.
+        path: PathBuf,
+    },
+    /// Import a distro from a tar file.
+    Import {
+        /// New distro name.
+        name: String,
+        /// Install directory.
+        dir: PathBuf,
+        /// Source tar path.
+        tar: PathBuf,
+    },
+    /// Install a distro from the online catalog.
+    Install {
+        /// The install id.
+        name: String,
+    },
+    /// Cancel the in-flight long-running operation.
+    CancelOp,
 }
 
 /// A distribution lifecycle operation.

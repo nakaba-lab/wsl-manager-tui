@@ -8,6 +8,8 @@ pub mod model;
 pub mod update;
 
 pub use message::{Action, Command, Event, LifecycleOp};
-pub use modal::{Confirm, Modal, TypedConfirm};
+pub use modal::{
+    Confirm, FormKind, FormState, InstallPickState, Modal, ProgressState, TextField, TypedConfirm,
+};
 pub use model::Model;
 pub use update::update;

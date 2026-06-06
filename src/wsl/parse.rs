@@ -1,9 +1,11 @@
-//! Parsing of `wsl --list --verbose` output into raw rows.
+//! Parsing of `wsl --list` output into raw rows.
 //!
 //! Deliberately locale-independent: the (localized) STATE column is ignored
 //! entirely, and the header is skipped by requiring the last token to be a
 //! numeric version. Running state is determined separately from
 //! `wsl --list --running` (see [`crate::wsl::collect`]).
+
+use crate::wsl::model::OnlineDistro;
 
 /// One row of `wsl -l -v`, before merging with registry/running data.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +37,56 @@ pub fn parse_list_verbose(text: &str) -> Vec<RawDistroRow> {
         });
     }
     rows
+}
+
+/// Parse decoded `wsl --list --online` text into installable distributions.
+///
+/// The output has prose intro lines, a header, then `NAME  FRIENDLY NAME` rows.
+/// We keep only lines that split into two columns (on a run of 2+ spaces) whose
+/// first column is an ASCII distro id, which skips prose and the (localized)
+/// header without depending on its text.
+pub fn parse_list_online(text: &str) -> Vec<OnlineDistro> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_start().trim_start_matches('*').trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, friendly)) = split_two_columns(line) else {
+            continue;
+        };
+        if !is_distro_id(name) || name.eq_ignore_ascii_case("NAME") {
+            continue;
+        }
+        out.push(OnlineDistro {
+            name: name.to_string(),
+            friendly: friendly.to_string(),
+        });
+    }
+    out
+}
+
+/// Split a line into `(first, rest)` at the first run of two or more spaces.
+fn split_two_columns(line: &str) -> Option<(&str, &str)> {
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len().saturating_sub(1) {
+        if bytes[i] == b' ' && bytes[i + 1] == b' ' {
+            let name = line[..i].trim_end();
+            let friendly = line[i..].trim_start();
+            if name.is_empty() || friendly.is_empty() {
+                return None;
+            }
+            return Some((name, friendly));
+        }
+    }
+    None
+}
+
+/// Whether a string is a plausible ASCII distro install id.
+fn is_distro_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
 #[cfg(test)]
@@ -80,5 +132,28 @@ mod tests {
     #[test]
     fn handles_empty_input() {
         assert!(parse_list_verbose("").is_empty());
+    }
+
+    const ONLINE: &str =
+        "The following is a list of valid distributions that can be installed.\r\n\
+Install using 'wsl.exe --install <Distro>'.\r\n\
+\r\n\
+NAME                   FRIENDLY NAME\r\n\
+Ubuntu                 Ubuntu\r\n\
+Debian                 Debian GNU/Linux\r\n\
+kali-linux             Kali Linux Rolling\r\n\
+Ubuntu-24.04           Ubuntu 24.04 LTS\r\n";
+
+    #[test]
+    fn parses_online_list_skipping_prose_and_header() {
+        let items = parse_list_online(ONLINE);
+        let names: Vec<&str> = items.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["Ubuntu", "Debian", "kali-linux", "Ubuntu-24.04"]);
+        assert_eq!(items[1].friendly, "Debian GNU/Linux");
+    }
+
+    #[test]
+    fn online_list_handles_empty() {
+        assert!(parse_list_online("").is_empty());
     }
 }

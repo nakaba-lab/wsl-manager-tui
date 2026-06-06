@@ -10,5 +10,5 @@ pub mod parse;
 pub use backend::{RealWslBackend, WslBackend};
 pub use collect::{collect_distros, refresh};
 pub use decode::{decode_utf8, decode_wsl_output};
-pub use model::{Distro, DistroState};
-pub use parse::{parse_list_verbose, RawDistroRow};
+pub use model::{Distro, DistroState, OnlineDistro};
+pub use parse::{parse_list_online, parse_list_verbose, RawDistroRow};

@@ -25,6 +25,8 @@ use crate::wsl::{self, RealWslBackend, WslBackend};
 
 /// Polling interval for the distro list (made configurable via prefs in M8).
 const TICK: Duration = Duration::from_secs(2);
+/// Animation interval for spinners (no polling).
+const FRAME: Duration = Duration::from_millis(120);
 
 /// Set up the terminal and run the event loop to completion, restoring the
 /// terminal afterwards regardless of how the loop ended.
@@ -41,7 +43,10 @@ pub async fn run() -> Result<()> {
 async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBackend>) -> Result<()> {
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(TICK);
+    let mut frame = tokio::time::interval(FRAME);
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
+    // Abort handle for the in-flight long-running operation (export/import/install).
+    let mut current_op: Option<tokio::task::AbortHandle> = None;
 
     // Kick off the initial load and metrics sample immediately.
     dispatch(Command::RefreshList, &backend, &action_tx);
@@ -62,6 +67,7 @@ async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBacken
                 _ => continue,
             },
             _ = tick.tick() => Action::Event(Event::Tick),
+            _ = frame.tick() => Action::Event(Event::Frame),
             Some(action) = action_rx.recv() => action,
         };
 
@@ -75,11 +81,59 @@ async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBacken
                     dispatch(Command::RefreshList, &backend, &action_tx);
                 }
                 Command::LaunchTabShell(name) => launch_tab_shell(&name, &action_tx),
+                // Long-running, cancellable operations: keep the abort handle so
+                // a later CancelOp (or a superseding op) can kill the child.
+                command @ (Command::Export { .. }
+                | Command::Import { .. }
+                | Command::Install { .. }) => {
+                    if let Some(previous) = current_op.take() {
+                        previous.abort();
+                    }
+                    current_op = Some(spawn_long_op(command, &backend, &action_tx));
+                }
+                Command::CancelOp => {
+                    if let Some(handle) = current_op.take() {
+                        handle.abort();
+                    }
+                }
                 spawnable => dispatch(spawnable, &backend, &action_tx),
             }
         }
     }
     Ok(())
+}
+
+/// Spawn a long-running operation, returning its abort handle so it can be
+/// cancelled. The child is killed if the task is aborted (`kill_on_drop`).
+fn spawn_long_op(
+    command: Command,
+    backend: &Arc<dyn WslBackend>,
+    tx: &UnboundedSender<Action>,
+) -> tokio::task::AbortHandle {
+    let backend = Arc::clone(backend);
+    let tx = tx.clone();
+    let task = tokio::spawn(async move {
+        let (label, result) = match &command {
+            Command::Export { name, path } => (
+                format!("Exported '{name}'"),
+                backend.export(name, path).await,
+            ),
+            Command::Import { name, dir, tar } => (
+                format!("Imported '{name}'"),
+                backend.import(name, dir, tar).await,
+            ),
+            Command::Install { name } => {
+                (format!("Installed '{name}'"), backend.install(name).await)
+            }
+            _ => return,
+        };
+        let action = match result {
+            Ok(()) => Action::OpDone(label),
+            Err(error) => Action::OpFailed(error.to_string()),
+        };
+        let _ = tx.send(action);
+    });
+    task.abort_handle()
 }
 
 /// Suspend the TUI, run `wsl -d <name>` with the console handed over, then
@@ -151,9 +205,25 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                 let _ = tx.send(action);
             });
         }
-        // Shell commands are handled inline in the event loop (they need the
-        // terminal), so they never reach the spawn-based dispatcher.
-        Command::LaunchInlineShell(_) | Command::LaunchTabShell(_) => {}
+        Command::ListOnline => {
+            tokio::spawn(async move {
+                let action = match backend.list_online().await {
+                    Ok(items) => Action::OnlineList(items),
+                    Err(error) => {
+                        Action::OpFailed(format!("Failed to list online distros: {error}"))
+                    }
+                };
+                let _ = tx.send(action);
+            });
+        }
+        // Shell commands and long-running/cancellable operations are handled
+        // inline in the event loop, so they never reach the spawn dispatcher.
+        Command::LaunchInlineShell(_)
+        | Command::LaunchTabShell(_)
+        | Command::Export { .. }
+        | Command::Import { .. }
+        | Command::Install { .. }
+        | Command::CancelOp => {}
     }
 }
 
@@ -190,8 +260,9 @@ fn map_event(event: CrosstermEvent) -> Option<Action> {
 mod tests {
     use super::*;
     use crate::error::{Result, WslError};
-    use crate::wsl::RawDistroRow;
+    use crate::wsl::{OnlineDistro, RawDistroRow};
     use async_trait::async_trait;
+    use std::path::Path;
     use std::sync::Mutex;
 
     /// A backend that records calls and can be configured to fail.
@@ -237,6 +308,18 @@ mod tests {
         }
         async fn unregister(&self, name: &str) -> Result<()> {
             self.record(format!("unregister {name}"))
+        }
+        async fn list_online(&self) -> Result<Vec<OnlineDistro>> {
+            Ok(vec![])
+        }
+        async fn export(&self, name: &str, _path: &Path) -> Result<()> {
+            self.record(format!("export {name}"))
+        }
+        async fn import(&self, name: &str, _dir: &Path, _tar: &Path) -> Result<()> {
+            self.record(format!("import {name}"))
+        }
+        async fn install(&self, name: &str) -> Result<()> {
+            self.record(format!("install {name}"))
         }
     }
 

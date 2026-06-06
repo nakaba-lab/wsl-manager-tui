@@ -30,7 +30,6 @@ sysinfo = "0.39.3"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "time", "sync", "io-std"] }
 toml = "1.1.2"
-tui-input = "0.15.3"
 unicode-width = "0.2.2"
 windows-registry = "0.6.1"
 # Dependencies are added incrementally per milestone via `cargo add`.

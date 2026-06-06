@@ -24,6 +24,15 @@ impl DistroState {
     }
 }
 
+/// A distribution available to install, from `wsl --list --online`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnlineDistro {
+    /// The install identifier (passed to `wsl --install -d`).
+    pub name: String,
+    /// The human-friendly name.
+    pub friendly: String,
+}
+
 /// A registered WSL distribution with metadata merged from `wsl.exe`, the
 /// running-distro set, and the registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
