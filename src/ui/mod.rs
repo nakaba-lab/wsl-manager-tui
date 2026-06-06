@@ -84,7 +84,7 @@ fn render_status(f: &mut Frame, model: &Model, area: Rect) {
     } else {
         (
             format!(
-                "{} distro(s) · j/k move · s start · x stop · X shutdown · d default · u unreg · r refresh · q quit",
+                "{} distro(s) · j/k move · Enter shell · w tab · s start · x stop · X shutdown · d default · u unreg · r refresh · q quit",
                 model.distros.len()
             ),
             Style::default(),

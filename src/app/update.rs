@@ -62,6 +62,11 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => model.should_quit = true,
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => model.select_next(),
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => model.select_prev(),
+        // Shift+Enter (where the terminal reports it) and `w` open a new tab;
+        // plain Enter runs an inline shell.
+        (KeyCode::Enter, m) if m.contains(KeyModifiers::SHIFT) => return launch_tab(model),
+        (KeyCode::Enter, _) => return launch_inline(model),
+        (KeyCode::Char('w'), _) => return launch_tab(model),
         (KeyCode::Char('r'), _) => return vec![Command::RefreshList],
         (KeyCode::Char('s'), _) => return start_selected(model),
         (KeyCode::Char('d'), _) => return set_default_selected(model),
@@ -91,6 +96,21 @@ fn set_default_selected(model: &mut Model) -> Vec<Command> {
     };
     model.status = Some(format!("Setting {name} as default…"));
     vec![Command::Lifecycle(LifecycleOp::SetDefault(name))]
+}
+
+fn launch_inline(model: &mut Model) -> Vec<Command> {
+    let Some(name) = selected_name(model) else {
+        return vec![];
+    };
+    model.status = Some(format!("Launching '{name}' shell…"));
+    vec![Command::LaunchInlineShell(name)]
+}
+
+fn launch_tab(model: &mut Model) -> Vec<Command> {
+    let Some(name) = selected_name(model) else {
+        return vec![];
+    };
+    vec![Command::LaunchTabShell(name)]
 }
 
 fn open_confirm_terminate(model: &mut Model) {
@@ -372,5 +392,33 @@ mod tests {
         assert!(m.last_error.is_none());
         assert!(m.loaded);
         assert_eq!(m.selected, 0);
+    }
+
+    #[test]
+    fn enter_launches_inline_shell() {
+        let mut m = model_with(&["Debian"]);
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(cmds, vec![Command::LaunchInlineShell("Debian".into())]);
+    }
+
+    #[test]
+    fn shift_enter_launches_tab_shell() {
+        let mut m = model_with(&["Debian"]);
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::SHIFT));
+        assert_eq!(cmds, vec![Command::LaunchTabShell("Debian".into())]);
+    }
+
+    #[test]
+    fn w_launches_tab_shell() {
+        let mut m = model_with(&["Debian"]);
+        let cmds = update(&mut m, ch('w'));
+        assert_eq!(cmds, vec![Command::LaunchTabShell("Debian".into())]);
+    }
+
+    #[test]
+    fn enter_with_empty_list_does_nothing() {
+        let mut m = Model::default();
+        let cmds = update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(cmds.is_empty());
     }
 }

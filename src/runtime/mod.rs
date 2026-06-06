@@ -64,10 +64,60 @@ async fn event_loop(tui: &mut Tui, model: &mut Model, backend: Arc<dyn WslBacken
         };
 
         for command in update(model, action) {
-            dispatch(command, &backend, &action_tx);
+            match command {
+                // Inline shell needs the terminal, so it runs here (not as a
+                // spawned task): suspend the TUI, hand over the console, resume.
+                Command::LaunchInlineShell(name) => {
+                    run_inline_shell(tui, &name).await?;
+                    model.status = Some(format!("Returned from '{name}'"));
+                    dispatch(Command::RefreshList, &backend, &action_tx);
+                }
+                Command::LaunchTabShell(name) => launch_tab_shell(&name, &action_tx),
+                spawnable => dispatch(spawnable, &backend, &action_tx),
+            }
         }
     }
     Ok(())
+}
+
+/// Suspend the TUI, run `wsl -d <name>` with the console handed over, then
+/// resume. Failures to spawn the shell are reported but never abort the app;
+/// only terminal suspend/resume errors propagate.
+async fn run_inline_shell(tui: &mut Tui, name: &str) -> Result<()> {
+    tui.suspend()?;
+    println!("\nLaunching WSL shell for '{name}' — type 'exit' to return to wslm.\n");
+
+    let distro = name.to_string();
+    let outcome = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("wsl.exe")
+            .args(["-d", &distro])
+            .status()
+    })
+    .await;
+    match outcome {
+        Ok(Ok(_status)) => {}
+        Ok(Err(error)) => eprintln!("Failed to launch shell: {error}"),
+        Err(error) => eprintln!("Shell task error: {error}"),
+    }
+
+    tui.resume()
+}
+
+/// Open an interactive shell in a new Windows Terminal tab. Reports success or,
+/// if `wt.exe` is missing, suggests the inline shell instead.
+fn launch_tab_shell(name: &str, tx: &UnboundedSender<Action>) {
+    let result = std::process::Command::new("wt.exe")
+        .args(["-w", "0", "nt", "wsl.exe", "-d", name])
+        .spawn();
+    let action = match result {
+        Ok(_child) => Action::OpDone(format!("Opened '{name}' in a new Windows Terminal tab")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Action::OpFailed(
+            "Windows Terminal (wt.exe) not found. Press Enter for an inline shell instead."
+                .to_string(),
+        ),
+        Err(error) => Action::OpFailed(format!("Failed to open tab: {error}")),
+    };
+    let _ = tx.send(action);
 }
 
 /// Execute a command as an async task, sending the resulting action back over
@@ -91,6 +141,9 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                 let _ = tx.send(action);
             });
         }
+        // Shell commands are handled inline in the event loop (they need the
+        // terminal), so they never reach the spawn-based dispatcher.
+        Command::LaunchInlineShell(_) | Command::LaunchTabShell(_) => {}
     }
 }
 

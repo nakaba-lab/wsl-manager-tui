@@ -45,6 +45,11 @@ pub enum Command {
     RefreshList,
     /// Run a distribution lifecycle operation.
     Lifecycle(LifecycleOp),
+    /// Suspend the TUI and run an interactive shell inline (`wsl -d <name>`),
+    /// resuming when it exits.
+    LaunchInlineShell(String),
+    /// Open an interactive shell in a new Windows Terminal tab.
+    LaunchTabShell(String),
 }
 
 /// A distribution lifecycle operation.
