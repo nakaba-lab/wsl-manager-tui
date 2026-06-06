@@ -1,5 +1,6 @@
 //! Modal dialog state overlaid on the main list.
 
+use super::config_edit::ConfigEditState;
 use super::message::LifecycleOp;
 use crate::wsl::OnlineDistro;
 
@@ -19,6 +20,8 @@ pub enum Modal {
     Progress(ProgressState),
     /// A filterable picker of installable distributions.
     InstallPick(InstallPickState),
+    /// The configuration editor (`.wslconfig` / `wsl.conf`).
+    ConfigEdit(ConfigEditState),
 }
 
 /// A confirmation dialog. Destructive operations may require typing the distro

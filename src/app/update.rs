@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
-    Action, Command, Confirm, Event, FormKind, FormState, InstallPickState, LifecycleOp, Modal,
-    Model, ProgressState, TypedConfirm,
+    Action, Command, ConfigEditState, Confirm, EditMode, Event, FormKind, FormState,
+    InstallPickState, LifecycleOp, Modal, Model, ProgressState, TypedConfirm,
 };
+use crate::config::ConfigTarget;
 
 /// Advance the model in response to an action, returning any side effects.
 pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
@@ -36,6 +37,10 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
         }
         Action::OnlineList(items) => {
             model.modal = Some(Modal::InstallPick(InstallPickState::new(items)));
+            vec![]
+        }
+        Action::ConfigLoaded { target, content } => {
+            model.modal = Some(Modal::ConfigEdit(ConfigEditState::new(target, &content)));
             vec![]
         }
         Action::OpDone(message) => {
@@ -101,6 +106,8 @@ fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
             model.status = Some("Fetching available distributions…".to_string());
             return vec![Command::ListOnline];
         }
+        (KeyCode::Char('c'), _) => return load_config(model, ConfigTarget::WslConfig),
+        (KeyCode::Char('C'), _) => return load_wslconf(model),
         _ => {}
     }
     vec![]
@@ -116,6 +123,18 @@ fn open_export_form(model: &mut Model) {
 
 fn open_import_form(model: &mut Model) {
     model.modal = Some(Modal::Form(FormState::import()));
+}
+
+fn load_config(model: &mut Model, target: ConfigTarget) -> Vec<Command> {
+    model.status = Some(format!("Loading {}…", target.label()));
+    vec![Command::LoadConfig(target)]
+}
+
+fn load_wslconf(model: &mut Model) -> Vec<Command> {
+    let Some(name) = selected_name(model) else {
+        return vec![];
+    };
+    load_config(model, ConfigTarget::WslConf(name))
 }
 
 fn selected_name(model: &Model) -> Option<String> {
@@ -197,6 +216,7 @@ fn handle_modal_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
         Modal::Form(form) => handle_form_key(model, form, key),
         Modal::Progress(progress) => handle_progress_key(model, progress, key),
         Modal::InstallPick(pick) => handle_install_key(model, pick, key),
+        Modal::ConfigEdit(state) => handle_config_key(model, state, key),
     }
 }
 
@@ -373,6 +393,60 @@ fn handle_install_key(
             model.modal = Some(Modal::InstallPick(pick));
             vec![]
         }
+    }
+}
+
+fn handle_config_key(model: &mut Model, mut state: ConfigEditState, key: KeyEvent) -> Vec<Command> {
+    // Ctrl+S saves and closes.
+    if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        let content = state.rendered();
+        let target = state.target.clone();
+        model.status = Some(format!("Saving {}…", target.label()));
+        return vec![Command::SaveConfig { target, content }];
+    }
+    match key.code {
+        KeyCode::Esc => return vec![], // cancelled (closed)
+        KeyCode::Tab => match state.mode {
+            EditMode::Form => state.to_raw(),
+            EditMode::Raw => state.to_form(),
+        },
+        _ => match state.mode {
+            EditMode::Form => config_form_key(&mut state, key),
+            EditMode::Raw => config_raw_key(&mut state, key),
+        },
+    }
+    model.modal = Some(Modal::ConfigEdit(state));
+    vec![]
+}
+
+fn config_form_key(state: &mut ConfigEditState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::BackTab => state.focus_prev(),
+        KeyCode::Down => state.focus_next(),
+        KeyCode::Char(c) => {
+            if let Some(field) = state.current_field_mut() {
+                field.input.insert(c);
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(field) = state.current_field_mut() {
+                field.input.backspace();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn config_raw_key(state: &mut ConfigEditState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char(c) => state.raw.insert(c),
+        KeyCode::Backspace => state.raw.backspace(),
+        KeyCode::Enter => state.raw.newline(),
+        KeyCode::Left => state.raw.left(),
+        KeyCode::Right => state.raw.right(),
+        KeyCode::Up => state.raw.up(),
+        KeyCode::Down => state.raw.down(),
+        _ => {}
     }
 }
 
@@ -719,5 +793,62 @@ mod tests {
             _ => panic!("expected progress modal"),
         };
         assert_eq!(after, before + 1);
+    }
+
+    fn config_loaded(content: &str) -> Action {
+        Action::ConfigLoaded {
+            target: ConfigTarget::WslConfig,
+            content: content.to_string(),
+        }
+    }
+
+    #[test]
+    fn c_loads_wslconfig() {
+        let mut m = model_with(&["Debian"]);
+        let cmds = update(&mut m, ch('c'));
+        assert_eq!(cmds, vec![Command::LoadConfig(ConfigTarget::WslConfig)]);
+    }
+
+    #[test]
+    fn shift_c_loads_wslconf_for_selected() {
+        let mut m = model_with(&["Debian"]);
+        let cmds = update(&mut m, key(KeyCode::Char('C'), KeyModifiers::SHIFT));
+        assert_eq!(
+            cmds,
+            vec![Command::LoadConfig(ConfigTarget::WslConf("Debian".into()))]
+        );
+    }
+
+    #[test]
+    fn config_loaded_opens_editor() {
+        let mut m = Model::default();
+        update(&mut m, config_loaded("[wsl2]\nmemory=8GB\n"));
+        assert!(matches!(m.modal, Some(Modal::ConfigEdit(_))));
+    }
+
+    #[test]
+    fn config_editor_saves_with_ctrl_s() {
+        let mut m = Model::default();
+        update(&mut m, config_loaded("[wsl2]\nmemory=8GB\n"));
+        let cmds = update(&mut m, key(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(matches!(
+            cmds.as_slice(),
+            [Command::SaveConfig {
+                target: ConfigTarget::WslConfig,
+                ..
+            }]
+        ));
+        assert!(m.modal.is_none());
+    }
+
+    #[test]
+    fn config_editor_tab_toggles_to_raw() {
+        let mut m = Model::default();
+        update(&mut m, config_loaded("[wsl2]\nmemory=8GB\n"));
+        update(&mut m, key(KeyCode::Tab, KeyModifiers::NONE));
+        match &m.modal {
+            Some(Modal::ConfigEdit(state)) => assert_eq!(state.mode, EditMode::Raw),
+            _ => panic!("expected config editor"),
+        }
     }
 }

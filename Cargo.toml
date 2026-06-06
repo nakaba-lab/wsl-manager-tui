@@ -28,7 +28,7 @@ ratatui = "0.30.1"
 serde = { version = "1.0.228", features = ["derive"] }
 sysinfo = "0.39.3"
 thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "time", "sync", "io-std"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process", "time", "sync", "io-std", "io-util"] }
 toml = "1.1.2"
 unicode-width = "0.2.2"
 windows-registry = "0.6.1"

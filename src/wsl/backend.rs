@@ -2,11 +2,13 @@
 //! and the real implementation that shells out to `wsl.exe`.
 
 use std::path::Path;
+use std::process::Stdio;
 
 use async_trait::async_trait;
+use tokio::io::AsyncWriteExt;
 
 use crate::error::{Result, WslError};
-use crate::wsl::decode::decode_wsl_output;
+use crate::wsl::decode::{decode_utf8, decode_wsl_output};
 use crate::wsl::model::OnlineDistro;
 use crate::wsl::parse::{parse_list_online, parse_list_verbose, RawDistroRow};
 
@@ -36,6 +38,10 @@ pub trait WslBackend: Send + Sync {
     async fn import(&self, name: &str, dir: &Path, tar: &Path) -> Result<()>;
     /// Install a distro (`wsl --install -d <name> --no-launch`).
     async fn install(&self, name: &str) -> Result<()>;
+    /// Read a distro's `/etc/wsl.conf` (as root); empty if it does not exist.
+    async fn read_conf(&self, distro: &str) -> Result<String>;
+    /// Write a distro's `/etc/wsl.conf` (as root), backing up the old file.
+    async fn write_conf(&self, distro: &str, content: &str) -> Result<()>;
 }
 
 /// The real backend that shells out to `wsl.exe`.
@@ -108,6 +114,60 @@ impl WslBackend for RealWslBackend {
         run_wsl_long(&["--install", "-d", name, "--no-launch"])
             .await
             .map(drop)
+    }
+
+    async fn read_conf(&self, distro: &str) -> Result<String> {
+        // In-distro output is UTF-8. A missing file is treated as empty.
+        let output = tokio::process::Command::new("wsl.exe")
+            .args(["-d", distro, "-u", "root", "--", "cat", "/etc/wsl.conf"])
+            .output()
+            .await?;
+        if output.status.success() {
+            Ok(decode_utf8(&output.stdout))
+        } else {
+            Ok(String::new())
+        }
+    }
+
+    async fn write_conf(&self, distro: &str, content: &str) -> Result<()> {
+        // Back up an existing file first (best effort).
+        let _ = tokio::process::Command::new("wsl.exe")
+            .args([
+                "-d",
+                distro,
+                "-u",
+                "root",
+                "--",
+                "sh",
+                "-c",
+                "test -f /etc/wsl.conf && cp /etc/wsl.conf /etc/wsl.conf.bak || true",
+            ])
+            .output()
+            .await?;
+
+        // Write the new content via `tee` (root) over stdin.
+        let mut child = tokio::process::Command::new("wsl.exe")
+            .args(["-d", distro, "-u", "root", "--", "tee", "/etc/wsl.conf"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(content.as_bytes()).await?;
+            stdin.shutdown().await?;
+        }
+        let status = child.wait().await?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(WslError::Command {
+                args: vec![
+                    "--".to_string(),
+                    "tee".to_string(),
+                    "/etc/wsl.conf".to_string(),
+                ],
+                message: "failed to write /etc/wsl.conf (need root?)".to_string(),
+            })
+        }
     }
 }
 

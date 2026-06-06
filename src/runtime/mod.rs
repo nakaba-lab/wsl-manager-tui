@@ -19,6 +19,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::app::{update, Action, Command, Event, LifecycleOp, Model};
+use crate::config::{self, ConfigTarget};
 use crate::metrics;
 use crate::ui;
 use crate::wsl::{self, RealWslBackend, WslBackend};
@@ -216,6 +217,40 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
                 let _ = tx.send(action);
             });
         }
+        Command::LoadConfig(target) => {
+            tokio::spawn(async move {
+                let result = match &target {
+                    ConfigTarget::WslConfig => load_wslconfig().await,
+                    ConfigTarget::WslConf(distro) => {
+                        backend.read_conf(distro).await.map_err(|e| e.to_string())
+                    }
+                };
+                let action = match result {
+                    Ok(content) => Action::ConfigLoaded { target, content },
+                    Err(error) => Action::OpFailed(format!("Failed to load config: {error}")),
+                };
+                let _ = tx.send(action);
+            });
+        }
+        Command::SaveConfig { target, content } => {
+            tokio::spawn(async move {
+                let result = match &target {
+                    ConfigTarget::WslConfig => save_wslconfig(content.clone()).await,
+                    ConfigTarget::WslConf(distro) => backend
+                        .write_conf(distro, &content)
+                        .await
+                        .map_err(|e| e.to_string()),
+                };
+                let action = match result {
+                    Ok(()) => Action::OpDone(format!(
+                        "Saved {} — run `wsl --shutdown` to apply",
+                        target.label()
+                    )),
+                    Err(error) => Action::OpFailed(format!("Failed to save config: {error}")),
+                };
+                let _ = tx.send(action);
+            });
+        }
         // Shell commands and long-running/cancellable operations are handled
         // inline in the event loop, so they never reach the spawn dispatcher.
         Command::LaunchInlineShell(_)
@@ -225,6 +260,22 @@ fn dispatch(command: Command, backend: &Arc<dyn WslBackend>, tx: &UnboundedSende
         | Command::Install { .. }
         | Command::CancelOp => {}
     }
+}
+
+/// Read `.wslconfig` off the async loop.
+async fn load_wslconfig() -> std::result::Result<String, String> {
+    tokio::task::spawn_blocking(config::load_wslconfig)
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.map_err(|e| e.to_string()))
+}
+
+/// Write `.wslconfig` off the async loop.
+async fn save_wslconfig(content: String) -> std::result::Result<(), String> {
+    tokio::task::spawn_blocking(move || config::save_wslconfig(&content))
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.map_err(|e| e.to_string()))
 }
 
 /// Run a lifecycle operation through the backend and map the outcome to an
@@ -320,6 +371,12 @@ mod tests {
         }
         async fn install(&self, name: &str) -> Result<()> {
             self.record(format!("install {name}"))
+        }
+        async fn read_conf(&self, _distro: &str) -> Result<String> {
+            Ok(String::new())
+        }
+        async fn write_conf(&self, distro: &str, _content: &str) -> Result<()> {
+            self.record(format!("write_conf {distro}"))
         }
     }
 

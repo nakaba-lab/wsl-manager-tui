@@ -11,7 +11,10 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use crate::app::{Confirm, FormKind, FormState, InstallPickState, Modal, Model, ProgressState};
+use crate::app::{
+    ConfigEditState, Confirm, EditMode, FormKind, FormState, InstallPickState, Modal, Model,
+    ProgressState,
+};
 use crate::metrics::MetricsHistory;
 use crate::wsl::{Distro, DistroState};
 
@@ -151,7 +154,7 @@ fn render_status(f: &mut Frame, model: &Model, area: Rect) {
     } else {
         (
             format!(
-                "{} distro(s) · j/k move · Enter shell · w tab · s start · x stop · X shutdown · d default · u unreg · r refresh · q quit",
+                "{} distro(s) · j/k · Enter shell · s start · x stop · X shutdown · d default · u unreg · e export · m import · i install · c/C config · r refresh · q quit",
                 model.distros.len()
             ),
             Style::default(),
@@ -167,7 +170,62 @@ fn render_modal(f: &mut Frame, modal: &Modal, area: Rect) {
         Modal::Form(form) => render_form(f, form, area),
         Modal::Progress(progress) => render_progress(f, progress, area),
         Modal::InstallPick(pick) => render_install_pick(f, pick, area),
+        Modal::ConfigEdit(state) => render_config_edit(f, state, area),
     }
+}
+
+fn render_config_edit(f: &mut Frame, state: &ConfigEditState, area: Rect) {
+    let popup = centered_rect(82, 26, area);
+    f.render_widget(Clear, popup);
+    let mode = match state.mode {
+        EditMode::Form => "Form",
+        EditMode::Raw => "Raw",
+    };
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Edit {} [{}] ",
+        state.target.label(),
+        mode
+    ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    match state.mode {
+        EditMode::Form => render_config_form(f, state, rows[0]),
+        EditMode::Raw => render_config_raw(f, state, rows[0]),
+    }
+    f.render_widget(
+        Paragraph::new("Tab: form/raw · Ctrl+S: save · Esc: cancel"),
+        rows[1],
+    );
+}
+
+fn render_config_form(f: &mut Frame, state: &ConfigEditState, area: Rect) {
+    let mut text = String::new();
+    for (i, field) in state.fields.iter().enumerate() {
+        let marker = if i == state.focus { "▶ " } else { "  " };
+        let cursor = if i == state.focus { "▏" } else { "" };
+        text.push_str(&format!(
+            "{marker}[{}] {} = {}{}   ({})\n",
+            field.key.section, field.key.key, field.input.value, cursor, field.key.hint
+        ));
+    }
+    f.render_widget(Paragraph::new(text), area);
+}
+
+fn render_config_raw(f: &mut Frame, state: &ConfigEditState, area: Rect) {
+    let mut text = String::new();
+    for (row, line) in state.raw.lines.iter().enumerate() {
+        if row == state.raw.row {
+            let head: String = line.chars().take(state.raw.col).collect();
+            let tail: String = line.chars().skip(state.raw.col).collect();
+            text.push_str(&format!("{head}▏{tail}\n"));
+        } else {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    f.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), area);
 }
 
 fn render_form(f: &mut Frame, form: &FormState, area: Rect) {
@@ -442,6 +500,22 @@ mod tests {
         assert!(rendered.contains("Install"), "picker title missing");
         assert!(rendered.contains("Ubuntu"), "Ubuntu missing");
         assert!(rendered.contains("Debian"), "Debian missing");
+    }
+
+    #[test]
+    fn renders_config_editor_form() {
+        use crate::app::ConfigEditState;
+        use crate::config::ConfigTarget;
+        let mut model = sample();
+        model.modal = Some(Modal::ConfigEdit(ConfigEditState::new(
+            ConfigTarget::WslConfig,
+            "[wsl2]\nmemory=8GB\n",
+        )));
+        let rendered = render(&model, 110, 30);
+        assert!(rendered.contains("Edit"), "editor title missing");
+        assert!(rendered.contains("memory"), "known key missing");
+        assert!(rendered.contains("8GB"), "value missing");
+        assert!(rendered.contains("Form"), "mode indicator missing");
     }
 
     #[test]

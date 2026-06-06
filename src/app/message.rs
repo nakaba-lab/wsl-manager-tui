@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use crossterm::event::KeyEvent;
 
+use crate::config::ConfigTarget;
 use crate::metrics::MetricsSample;
 use crate::wsl::{Distro, OnlineDistro};
 
@@ -38,6 +39,13 @@ pub enum Action {
     MetricsSampled(MetricsSample),
     /// The list of installable distributions arrived.
     OnlineList(Vec<OnlineDistro>),
+    /// A configuration file was loaded for editing.
+    ConfigLoaded {
+        /// Which file was loaded.
+        target: ConfigTarget,
+        /// Its current contents.
+        content: String,
+    },
     /// A lifecycle operation finished successfully (carries a status message).
     OpDone(String),
     /// A lifecycle operation failed (carries an error message).
@@ -86,6 +94,15 @@ pub enum Command {
     },
     /// Cancel the in-flight long-running operation.
     CancelOp,
+    /// Load a configuration file for editing.
+    LoadConfig(ConfigTarget),
+    /// Save a configuration file.
+    SaveConfig {
+        /// Which file to save.
+        target: ConfigTarget,
+        /// The new contents.
+        content: String,
+    },
 }
 
 /// A distribution lifecycle operation.

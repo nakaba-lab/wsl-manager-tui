@@ -2,11 +2,13 @@
 //! and modal types that drive the MVU loop. This module is the main test
 //! surface and must remain terminal- and IO-independent.
 
+pub mod config_edit;
 pub mod message;
 pub mod modal;
 pub mod model;
 pub mod update;
 
+pub use config_edit::{ConfigEditState, ConfigField, EditMode, RawEditor};
 pub use message::{Action, Command, Event, LifecycleOp};
 pub use modal::{
     Confirm, FormKind, FormState, InstallPickState, Modal, ProgressState, TextField, TypedConfirm,
