@@ -32,7 +32,7 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "process"
 toml = "1.1.2"
 unicode-width = "0.2.2"
 windows-registry = "0.6.1"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_System_WindowsProgramming", "Wdk_System_SystemInformation"] }
 # Dependencies are added incrementally per milestone via `cargo add`.
 
 [dev-dependencies]

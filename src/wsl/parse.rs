@@ -103,6 +103,20 @@ pub fn parse_df(text: &str) -> Option<(u64, u64)> {
     None
 }
 
+/// Parse `/proc/meminfo` for the WSL VM's total RAM, in bytes. The `MemTotal:`
+/// value is in kibibytes (Linux labels it `kB` but means KiB). This equals the
+/// memory assigned to the WSL 2 VM (`.wslconfig` `[wsl2] memory`, or the default
+/// of 50% of host RAM), as the kernel sees it.
+pub fn parse_meminfo_total(text: &str) -> Option<u64> {
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("MemTotal:") {
+            let kib: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kib * 1024);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +215,21 @@ Debian                 Debian GNU/Linux\r\n";
     fn parse_df_handles_garbage() {
         assert_eq!(parse_df(""), None);
         assert_eq!(parse_df("not a df output\n"), None);
+    }
+
+    #[test]
+    fn parses_meminfo_total() {
+        let meminfo = "MemTotal:       16384000 kB\n\
+MemFree:         8000000 kB\n\
+MemAvailable:   12000000 kB\n";
+        // 16384000 KiB → bytes.
+        assert_eq!(parse_meminfo_total(meminfo), Some(16_384_000 * 1024));
+    }
+
+    #[test]
+    fn parse_meminfo_total_handles_garbage() {
+        assert_eq!(parse_meminfo_total(""), None);
+        assert_eq!(parse_meminfo_total("MemFree: 100 kB\n"), None);
+        assert_eq!(parse_meminfo_total("MemTotal: notanumber kB\n"), None);
     }
 }

@@ -58,6 +58,7 @@ pub enum Key {
     DetailInnerDisk,
     DetailPath,
     DetailVmMem,
+    DetailVmMemTrend,
     // Distro state.
     StateRunning,
     StateStopped,
@@ -157,6 +158,7 @@ impl Key {
         Key::DetailInnerDisk,
         Key::DetailPath,
         Key::DetailVmMem,
+        Key::DetailVmMemTrend,
         Key::StateRunning,
         Key::StateStopped,
         Key::StateInstalling,
@@ -251,6 +253,7 @@ fn entry(key: Key) -> (&'static str, &'static str) {
         Key::DetailInnerDisk => ("In-distro", "内部ディスク"),
         Key::DetailPath => ("Path", "パス"),
         Key::DetailVmMem => ("VM Mem", "VMメモリ"),
+        Key::DetailVmMemTrend => ("Trend", "推移"),
         Key::StateRunning => ("Running", "実行中"),
         Key::StateStopped => ("Stopped", "停止"),
         Key::StateInstalling => ("Installing", "インストール中"),

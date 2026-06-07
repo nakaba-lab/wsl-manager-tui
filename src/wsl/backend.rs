@@ -11,7 +11,9 @@ use crate::error::{Result, WslError};
 use crate::manage::ExportFormat;
 use crate::wsl::decode::{decode_utf8, decode_wsl_output};
 use crate::wsl::model::OnlineDistro;
-use crate::wsl::parse::{parse_df, parse_list_online, parse_list_verbose, RawDistroRow};
+use crate::wsl::parse::{
+    parse_df, parse_list_online, parse_list_verbose, parse_meminfo_total, RawDistroRow,
+};
 
 /// Abstraction over the `wsl.exe` CLI so the app can be driven by a mock in
 /// tests. Transfer/install operations are added in later milestones.
@@ -41,6 +43,10 @@ pub trait WslBackend: Send + Sync {
     async fn install(&self, name: &str) -> Result<()>;
     /// In-distro root filesystem usage as `(used, total)` bytes (`df -kP /`).
     async fn inner_disk(&self, distro: &str) -> Result<Option<(u64, u64)>>;
+    /// The WSL VM's total RAM in bytes, read from a running distro's
+    /// `/proc/meminfo` (`MemTotal`). This is the VM's memory ceiling — the
+    /// `.wslconfig` `[wsl2] memory` value, or WSL's default of 50% of host RAM.
+    async fn vm_memory_total(&self, distro: &str) -> Result<Option<u64>>;
     /// Read a distro's `/etc/wsl.conf` (as root); empty if it does not exist.
     async fn read_conf(&self, distro: &str) -> Result<String>;
     /// Write a distro's `/etc/wsl.conf` (as root), backing up the old file.
@@ -127,6 +133,20 @@ impl WslBackend for RealWslBackend {
             .await?;
         if output.status.success() {
             Ok(parse_df(&decode_utf8(&output.stdout)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn vm_memory_total(&self, distro: &str) -> Result<Option<u64>> {
+        // In-distro output is UTF-8. `/proc/meminfo` is a kernel pseudo-file with
+        // stable, English keys (locale-independent).
+        let output = tokio::process::Command::new("wsl.exe")
+            .args(["-d", distro, "--", "cat", "/proc/meminfo"])
+            .output()
+            .await?;
+        if output.status.success() {
+            Ok(parse_meminfo_total(&decode_utf8(&output.stdout)))
         } else {
             Ok(None)
         }
