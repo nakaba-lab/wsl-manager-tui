@@ -141,11 +141,16 @@ fn handle_filter_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
 fn handle_list_key(model: &mut Model, key: KeyEvent) -> Vec<Command> {
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), _) => model.modal = Some(Modal::Quit),
-        (KeyCode::Char('c'), KeyModifiers::CONTROL) => model.should_quit = true,
-        // Esc clears an active filter (quit is via `q`).
+        // Ctrl+C asks to quit too (no immediate force-quit).
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => model.modal = Some(Modal::Quit),
+        // Esc backs out one level: clear an active filter first, else confirm quit.
         (KeyCode::Esc, _) => {
-            model.filter.clear();
-            model.selected = 0;
+            if model.filter.is_empty() {
+                model.modal = Some(Modal::Quit);
+            } else {
+                model.filter.clear();
+                model.selected = 0;
+            }
         }
         (KeyCode::Char('/'), _) => model.filter_mode = true,
         (KeyCode::Char('?'), _) => model.modal = Some(Modal::Help),
@@ -401,10 +406,42 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_quits() {
+    fn ctrl_c_opens_quit_confirm_then_y_quits() {
         let mut m = Model::default();
         update(&mut m, key(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(!m.should_quit, "Ctrl+C should ask, not quit immediately");
+        assert!(matches!(m.modal, Some(Modal::Quit)));
+        update(&mut m, ch('y'));
         assert!(m.should_quit);
+    }
+
+    #[test]
+    fn esc_opens_quit_confirm_when_no_filter() {
+        let mut m = model_with(&["Debian"]);
+        update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!m.should_quit, "Esc should ask, not quit immediately");
+        assert!(matches!(m.modal, Some(Modal::Quit)));
+        // Enter confirms the quit.
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(m.should_quit);
+    }
+
+    #[test]
+    fn esc_clears_active_filter_instead_of_quitting() {
+        let mut m = model_with(&["Debian", "Ubuntu"]);
+        // Apply a filter, then leave filter mode (Enter keeps it applied).
+        update(&mut m, ch('/'));
+        update(&mut m, ch('U'));
+        update(&mut m, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!m.filter.is_empty(), "filter is applied in list view");
+        // Esc backs out one level: clears the filter, does NOT open quit.
+        update(&mut m, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(m.filter.is_empty(), "Esc clears the active filter");
+        assert!(
+            m.modal.is_none(),
+            "Esc must not open quit while a filter was active"
+        );
+        assert!(!m.should_quit);
     }
 
     #[test]
