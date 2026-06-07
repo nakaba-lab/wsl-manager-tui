@@ -15,6 +15,19 @@ use crate::wsl::parse::{
     parse_df, parse_list_online, parse_list_verbose, parse_meminfo_total, RawDistroRow,
 };
 
+/// Windows `CREATE_NO_WINDOW` process-creation flag.
+///
+/// Every `wsl.exe` invocation here runs the child *detached from wslm's console*.
+/// This is load-bearing, not cosmetic: an in-distro `wsl -d <name> -- <cmd>`
+/// (used for the `df`/`/proc/meminfo` metrics) otherwise attaches to the shared
+/// console and sets up a TTY relay that races wslm for the console input buffer,
+/// silently swallowing and corrupting key presses — most visibly Esc and Enter,
+/// whose key-*down* events get eaten while their key-*up* leaks through. Because
+/// stdout/stderr (and stdin, where used) are captured through pipes, the child
+/// needs no console of its own. The interactive inline shell in `runtime` is the
+/// deliberate exception: it hands the console over on purpose.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// Abstraction over the `wsl.exe` CLI so the app can be driven by a mock in
 /// tests. Transfer/install operations are added in later milestones.
 #[async_trait]
@@ -129,6 +142,7 @@ impl WslBackend for RealWslBackend {
         // In-distro output is UTF-8. `df -kP /` is POSIX and parseable.
         let output = tokio::process::Command::new("wsl.exe")
             .args(["-d", distro, "--", "df", "-kP", "/"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .await?;
         if output.status.success() {
@@ -143,6 +157,7 @@ impl WslBackend for RealWslBackend {
         // stable, English keys (locale-independent).
         let output = tokio::process::Command::new("wsl.exe")
             .args(["-d", distro, "--", "cat", "/proc/meminfo"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .await?;
         if output.status.success() {
@@ -156,6 +171,7 @@ impl WslBackend for RealWslBackend {
         // In-distro output is UTF-8. A missing file is treated as empty.
         let output = tokio::process::Command::new("wsl.exe")
             .args(["-d", distro, "-u", "root", "--", "cat", "/etc/wsl.conf"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .await?;
         if output.status.success() {
@@ -178,12 +194,14 @@ impl WslBackend for RealWslBackend {
                 "-c",
                 "test -f /etc/wsl.conf && cp /etc/wsl.conf /etc/wsl.conf.bak || true",
             ])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .await?;
 
         // Write the new content via `tee` (root) over stdin.
         let mut child = tokio::process::Command::new("wsl.exe")
             .args(["-d", distro, "-u", "root", "--", "tee", "/etc/wsl.conf"])
+            .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .spawn()?;
@@ -239,6 +257,7 @@ async fn run_wsl_long(args: &[&str]) -> Result<String> {
 async fn run_wsl_inner(args: &[&str], kill_on_drop: bool) -> Result<String> {
     let output = tokio::process::Command::new("wsl.exe")
         .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
         .kill_on_drop(kill_on_drop)
         .output()
         .await?;
