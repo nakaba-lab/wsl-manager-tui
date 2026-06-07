@@ -231,8 +231,8 @@ impl Key {
 fn entry(key: Key) -> (&'static str, &'static str) {
     match key {
         Key::StatusHint => (
-            "j/k move · Enter shell · s start · x stop · X shutdown · d default · u unreg · e export · m import · i install · c/C config · L lang · / filter · ? help · q quit",
-            "j/k 移動 · Enter シェル · s 起動 · x 停止 · X 全停止 · d 既定 · u 登録解除 · e エクスポート · m インポート · i インストール · c/C 設定 · L 言語 · / フィルタ · ? ヘルプ · q 終了",
+            "j/k move · Enter shell · s start · x stop · X shutdown · d default · u unreg · e export · m import · i install · c/C config · L lang · / filter · ? help · q/Esc quit",
+            "j/k 移動 · Enter シェル · s 起動 · x 停止 · X 全停止 · d 既定 · u 登録解除 · e エクスポート · m インポート · i インストール · c/C 設定 · L 言語 · / フィルタ · ? ヘルプ · q/Esc 終了",
         ),
         Key::Loading => ("loading…", "読み込み中…"),
         Key::ErrorPrefix => ("error", "エラー"),
@@ -407,7 +407,7 @@ const HELP_EN: &str = "\
  L             toggle English / Japanese
  r             refresh now
  ?             this help
- q             quit  (Ctrl+C forces quit)
+ q / Esc       quit  (Ctrl+C too; all ask to confirm)
 
  Press any key to close.";
 
@@ -428,7 +428,7 @@ const HELP_JA: &str = "\
  L             英語 / 日本語 切替
  r             今すぐ更新
  ?             このヘルプ
- q             終了  (Ctrl+C で強制終了)
+ q / Esc       終了  (Ctrl+C も同様・いずれも確認あり)
 
  任意のキーで閉じます。";
 
