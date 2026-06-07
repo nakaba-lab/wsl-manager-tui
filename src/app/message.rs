@@ -45,6 +45,10 @@ pub enum Action {
         /// The usage, or `None` if it could not be read.
         inner: Option<(u64, u64)>,
     },
+    /// The WSL VM's total RAM (bytes) arrived, read from a running distro's
+    /// `/proc/meminfo`. Machine-wide (the VM is shared), so no distro name.
+    /// `None` if it could not be read.
+    VmMemorySampled(Option<u64>),
     /// The list of installable distributions arrived.
     OnlineList(Vec<OnlineDistro>),
     /// The runtime computed the default export filename; open the export form.
@@ -81,6 +85,8 @@ pub enum Command {
     SampleMetrics,
     /// Sample in-distro filesystem usage for a single (running) distro.
     SampleInnerDisk(String),
+    /// Sample the WSL VM's total RAM via a running distro's `/proc/meminfo`.
+    SampleVmMemory(String),
     /// Run a distribution lifecycle operation.
     Lifecycle(LifecycleOp),
     /// Suspend the TUI and run an interactive shell inline (`wsl -d <name>`),

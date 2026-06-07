@@ -38,7 +38,9 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
             model.loaded = true;
             model.last_error = None;
             model.clamp_selection();
-            sample_inner_disk_if_needed(model)
+            let mut cmds = sample_inner_disk_if_needed(model);
+            cmds.extend(sample_vm_memory_if_needed(model));
+            cmds
         }
         Action::RefreshFailed(message) => {
             model.loaded = true;
@@ -53,6 +55,14 @@ pub fn update(model: &mut Model, action: Action) -> Vec<Command> {
             if let Some(distro) = model.distros.iter_mut().find(|d| d.name == name) {
                 distro.inner_disk = inner;
             }
+            vec![]
+        }
+        Action::VmMemorySampled(total) => {
+            model.vm_mem_total = total;
+            // Only a successful read latches the once-per-run gate; a failed
+            // sample (`None`) leaves it open so the next refresh retries rather
+            // than sticking on the host-RAM fallback denominator.
+            model.vm_mem_attempted = total.is_some();
             vec![]
         }
         Action::OnlineList(items) => {
@@ -225,6 +235,31 @@ fn sample_inner_disk_if_needed(model: &mut Model) -> Vec<Command> {
     }
     model.inner_disk_attempted.insert(name.clone());
     vec![Command::SampleInnerDisk(name)]
+}
+
+/// If the WSL VM is up (any distro running) and we don't yet have its total RAM,
+/// request it (machine-wide). The gate is latched here to avoid duplicate
+/// in-flight requests and released again on a failed sample (see
+/// [`Action::VmMemorySampled`]), so a successful read costs no per-poll
+/// `/proc/meminfo` while a transient miss still recovers. When the VM is down,
+/// forget the reading so it is re-measured on the next start (e.g. after a
+/// `.wslconfig` memory change).
+fn sample_vm_memory_if_needed(model: &mut Model) -> Vec<Command> {
+    let Some(name) = model
+        .distros
+        .iter()
+        .find(|distro| distro.state == DistroState::Running)
+        .map(|distro| distro.name.clone())
+    else {
+        model.vm_mem_attempted = false;
+        model.vm_mem_total = None;
+        return vec![];
+    };
+    if model.vm_mem_attempted {
+        return vec![];
+    }
+    model.vm_mem_attempted = true;
+    vec![Command::SampleVmMemory(name)]
 }
 
 fn start_selected(model: &mut Model) -> Vec<Command> {
@@ -1056,10 +1091,79 @@ mod tests {
     fn refreshed_samples_inner_disk_for_running_selected_once_only() {
         let mut m = Model::default();
         let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
-        assert_eq!(cmds, vec![Command::SampleInnerDisk("Debian".into())]);
-        // A second refresh must NOT re-sample (no per-poll df).
+        assert_eq!(
+            cmds,
+            vec![
+                Command::SampleInnerDisk("Debian".into()),
+                Command::SampleVmMemory("Debian".into()),
+            ]
+        );
+        // A second refresh must NOT re-sample (no per-poll df / meminfo).
         let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
         assert!(cmds.is_empty(), "must not re-sample the same distro");
+    }
+
+    #[test]
+    fn vm_memory_sampled_sets_total() {
+        let mut m = Model::default();
+        update(
+            &mut m,
+            Action::VmMemorySampled(Some(8 * 1024 * 1024 * 1024)),
+        );
+        assert_eq!(m.vm_mem_total, Some(8 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn vm_memory_resets_and_resamples_when_vm_cycles() {
+        let mut m = Model::default();
+        // VM up: sample once and record the total.
+        update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        update(
+            &mut m,
+            Action::VmMemorySampled(Some(4 * 1024 * 1024 * 1024)),
+        );
+        assert_eq!(m.vm_mem_total, Some(4 * 1024 * 1024 * 1024));
+
+        // VM down (no running distro): forget the stale total so the next start
+        // re-measures it (e.g. after a `.wslconfig` change).
+        let cmds = update(&mut m, Action::Refreshed(vec![distro("Debian")]));
+        assert!(cmds.is_empty());
+        assert_eq!(m.vm_mem_total, None);
+
+        // VM up again: re-sample.
+        let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        assert!(cmds.contains(&Command::SampleVmMemory("Debian".into())));
+    }
+
+    #[test]
+    fn vm_memory_retries_after_a_failed_sample() {
+        let mut m = Model::default();
+        update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        // The one attempt failed (e.g. the distro was mid-boot): do NOT latch a
+        // wrong host-RAM denominator forever — the next refresh must retry.
+        update(&mut m, Action::VmMemorySampled(None));
+        assert_eq!(m.vm_mem_total, None);
+        let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        assert!(
+            cmds.contains(&Command::SampleVmMemory("Debian".into())),
+            "a failed sample must be retried on the next refresh"
+        );
+    }
+
+    #[test]
+    fn vm_memory_not_resampled_after_success() {
+        let mut m = Model::default();
+        update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        update(
+            &mut m,
+            Action::VmMemorySampled(Some(4 * 1024 * 1024 * 1024)),
+        );
+        // A successful read latches: no per-poll re-sampling.
+        let cmds = update(&mut m, Action::Refreshed(vec![running_distro("Debian")]));
+        assert!(
+            !cmds.iter().any(|c| matches!(c, Command::SampleVmMemory(_))),
+            "must not re-sample once a value is known"
+        );
     }
 
     #[test]

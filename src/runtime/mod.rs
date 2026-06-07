@@ -307,16 +307,27 @@ fn dispatch(
         }
         Command::SampleMetrics => {
             tokio::spawn(async move {
-                let sample = tokio::task::spawn_blocking(metrics::sample)
+                // `sample` is `None` when the kernel process query fails; skip the
+                // update so the previous reading is kept rather than flipped to
+                // "VM not running".
+                if let Some(sample) = tokio::task::spawn_blocking(metrics::sample)
                     .await
-                    .unwrap_or_default();
-                let _ = tx.send(Action::MetricsSampled(sample));
+                    .unwrap_or_default()
+                {
+                    let _ = tx.send(Action::MetricsSampled(sample));
+                }
             });
         }
         Command::SampleInnerDisk(name) => {
             tokio::spawn(async move {
                 let inner = backend.inner_disk(&name).await.ok().flatten();
                 let _ = tx.send(Action::InnerDiskSampled { name, inner });
+            });
+        }
+        Command::SampleVmMemory(name) => {
+            tokio::spawn(async move {
+                let total = backend.vm_memory_total(&name).await.ok().flatten();
+                let _ = tx.send(Action::VmMemorySampled(total));
             });
         }
         Command::Lifecycle(op) => {
@@ -535,6 +546,9 @@ mod tests {
             self.record(format!("install {name}"))
         }
         async fn inner_disk(&self, _distro: &str) -> Result<Option<(u64, u64)>> {
+            Ok(None)
+        }
+        async fn vm_memory_total(&self, _distro: &str) -> Result<Option<u64>> {
             Ok(None)
         }
         async fn read_conf(&self, _distro: &str) -> Result<String> {

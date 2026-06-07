@@ -41,6 +41,13 @@ pub struct Model {
     /// Distro names we've already attempted an in-distro disk sample for, so we
     /// fetch it at most once per distro (no per-poll `df`).
     pub inner_disk_attempted: HashSet<String>,
+    /// The WSL VM's total RAM in bytes (from `/proc/meminfo`), used as the VM
+    /// memory denominator. `None` until sampled or while the VM is down.
+    pub vm_mem_total: Option<u64>,
+    /// Whether the VM RAM total has been obtained (or a request is in flight)
+    /// for the current VM run, so a successful read is not re-sampled each poll.
+    /// Released on a failed sample (to retry) and reset when the VM goes down.
+    pub vm_mem_attempted: bool,
     /// The current UI language.
     pub lang: Lang,
     /// How navigation keys behave.

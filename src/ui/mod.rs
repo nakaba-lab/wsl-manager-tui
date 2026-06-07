@@ -86,7 +86,7 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
         t(lang, Key::DetailPath),
         path,
         t(lang, Key::DetailVmMem),
-        vm_mem_line(lang, &model.metrics),
+        vm_mem_line(lang, &model.metrics, model.vm_mem_total),
     );
     if let Some((used, total)) = distro.inner_disk {
         info.push_str(&format!(
@@ -98,23 +98,34 @@ fn render_detail(f: &mut Frame, model: &Model, area: Rect) {
     }
     f.render_widget(Paragraph::new(info), rows[0]);
 
+    // Bottom row: a short label, then the vmmem history sparkline filling the
+    // rest. Label width is measured in display columns so CJK glyphs line up.
+    let trend_label = t(lang, Key::DetailVmMemTrend);
+    let label_cols = UnicodeWidthStr::width(trend_label) as u16 + 1;
+    let trend =
+        Layout::horizontal([Constraint::Length(label_cols), Constraint::Min(1)]).split(rows[1]);
+    f.render_widget(Paragraph::new(trend_label), trend[0]);
+
     let data = model.metrics.sparkline();
     let sparkline = Sparkline::default()
         .data(data.as_slice())
         .style(Style::default().fg(Color::Cyan));
-    f.render_widget(sparkline, rows[1]);
+    f.render_widget(sparkline, trend[1]);
 }
 
-fn vm_mem_line(lang: Lang, metrics: &MetricsHistory) -> String {
+fn vm_mem_line(lang: Lang, metrics: &MetricsHistory, vm_mem_total: Option<u64>) -> String {
     let note = t(lang, Key::VmSharedNote);
-    match metrics.latest_vmmem {
-        Some(used) if metrics.total_mem_bytes > 0 => format!(
-            "{} / {} {note}",
-            human_size(used),
-            human_size(metrics.total_mem_bytes)
-        ),
-        Some(used) => format!("{} {note}", human_size(used)),
-        None => t(lang, Key::VmNotRunning).to_string(),
+    // Denominator: the WSL VM's own RAM ceiling (from `/proc/meminfo`) when
+    // known, falling back to host physical RAM until it has been sampled.
+    let total = vm_mem_total
+        .filter(|&bytes| bytes > 0)
+        .or_else(|| (metrics.total_mem_bytes > 0).then_some(metrics.total_mem_bytes));
+    match (metrics.latest_vmmem, total) {
+        (Some(used), Some(total)) => {
+            format!("{} / {} {note}", human_size(used), human_size(total))
+        }
+        (Some(used), None) => format!("{} {note}", human_size(used)),
+        (None, _) => t(lang, Key::VmNotRunning).to_string(),
     }
 }
 
@@ -544,6 +555,24 @@ mod tests {
         assert!(rendered.contains("Detail: Debian"), "detail title missing");
         assert!(rendered.contains("VM Mem"), "vm memory line missing");
         assert!(rendered.contains("2.0 GB"), "vm memory value missing");
+        assert!(rendered.contains("Trend"), "sparkline label missing");
+    }
+
+    #[test]
+    fn vm_memory_denominator_uses_wsl_vm_ram_when_known() {
+        use crate::metrics::MetricsSample;
+        let mut model = sample();
+        model.metrics.push(&MetricsSample {
+            vmmem_bytes: Some(2 * 1024 * 1024 * 1024),
+            total_mem_bytes: 8 * 1024 * 1024 * 1024, // host RAM
+        });
+        model.vm_mem_total = Some(4 * 1024 * 1024 * 1024); // WSL VM ceiling
+        let rendered = render(&model, 110, 24);
+        // Denominator is the VM's RAM (4 GB), not the host's (8 GB).
+        assert!(
+            rendered.contains("2.0 GB / 4.0 GB"),
+            "VM RAM should be the denominator"
+        );
     }
 
     #[test]
