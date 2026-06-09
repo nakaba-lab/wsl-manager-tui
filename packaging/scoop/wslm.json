@@ -6,7 +6,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/nakaba-lab/wsl-manager-tui/releases/download/v1.0.0/wslm-x86_64-pc-windows-msvc.exe#/wslm.exe",
-            "hash": "8fb0382663b70be7bb0b1cce6ee5877a2dcafe2c1939cb615a4d84ff0914ac14"
+            "hash": "2596571a3d40e415aa23da9b60facdf132a208fe501a1598c8dcd2a6ce7e8b41"
         }
     },
     "bin": "wslm.exe",
