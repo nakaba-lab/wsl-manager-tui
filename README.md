@@ -105,6 +105,17 @@ Grab the prebuilt `wslm.exe` from the
 `v*` tag publishes one), drop it anywhere on your `PATH`, and run `wslm`. It is
 a single self-contained executable with no install step.
 
+### Install with Scoop
+
+This repository doubles as its own [Scoop](https://scoop.sh) bucket:
+
+```powershell
+scoop bucket add wslm https://github.com/nakaba-lab/wsl-manager-tui
+scoop install wslm
+```
+
+`scoop update wslm` upgrades to the latest release.
+
 ### Build from source
 
 ```sh
