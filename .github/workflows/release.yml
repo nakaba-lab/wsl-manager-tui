@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # rustup reads rust-toolchain.toml and installs the pinned toolchain.
+      - name: Show toolchain
+        run: rustup show
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/wslm.exe dist/wslm-x86_64-pc-windows-msvc.exe
+          Copy-Item LICENSE-MIT, LICENSE-APACHE dist/
+          $hash = (Get-FileHash dist/wslm-x86_64-pc-windows-msvc.exe -Algorithm SHA256).Hash.ToLower()
+          # sha256sum-compatible: "<hash>  <filename>" (two spaces), LF + UTF-8 (no BOM)
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'dist/SHA256SUMS'), "$hash  wslm-x86_64-pc-windows-msvc.exe`n")
+
+      - name: Publish release with binary
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/wslm-x86_64-pc-windows-msvc.exe
+            dist/SHA256SUMS
+            dist/LICENSE-MIT
+            dist/LICENSE-APACHE
+          generate_release_notes: true
