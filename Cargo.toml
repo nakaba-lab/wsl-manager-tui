@@ -10,6 +10,16 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["wsl", "tui", "ratatui", "windows", "manager"]
 categories = ["command-line-utilities"]
+# Publish only what the crate needs — keep internal docs, .claude tooling, CI,
+# packaging, and the Scoop bucket out of the crates.io tarball.
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
 
 # Library crate (wsl_manager_tui) holds the pure logic; the thin `wslm` binary drives it.
 [lib]
