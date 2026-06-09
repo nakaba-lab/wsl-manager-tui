@@ -116,6 +116,15 @@ scoop install wslm
 
 `scoop update wslm` upgrades to the latest release.
 
+### Install with Cargo
+
+```sh
+cargo install wsl-manager-tui
+```
+
+Installs the `wslm` binary from [crates.io](https://crates.io/crates/wsl-manager-tui)
+(a Windows host with WSL2 is required to run it).
+
 ### Build from source
 
 ```sh
