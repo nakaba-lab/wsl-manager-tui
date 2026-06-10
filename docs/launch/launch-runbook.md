@@ -71,8 +71,8 @@ treat a front-page HN hit as upside, not the plan.
 
 ## Install-path setup (do BEFORE launch so "install" is a one-liner on arrival)
 
-- [x] **Scoop bucket:** DONE — this repo *is* the bucket (`bucket/wslm.json`). Users run
-      `scoop bucket add wslm https://github.com/nakaba-lab/wsl-manager-tui; scoop install wslm`.
+- [x] **Scoop bucket:** DONE — published via the shared [nakaba-lab/scoop-bucket](https://github.com/nakaba-lab/scoop-bucket).
+      Users run `scoop bucket add nakaba-lab https://github.com/nakaba-lab/scoop-bucket; scoop install wslm`.
 - [ ] **winget:** `wingetcreate new https://github.com/nakaba-lab/wsl-manager-tui/releases/download/v1.0.0/wslm-x86_64-pc-windows-msvc.exe`
       → review the generated manifests (portable installer type) → submit the PR to microsoft/winget-pkgs.
 - [ ] **crates.io:** `cargo publish` (enables `cargo install wsl-manager-tui` → `wslm`).

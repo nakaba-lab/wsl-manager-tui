@@ -22,8 +22,9 @@ single empirically-supported lever that turns a flatlined tip jar into a slow tr
 
 ## After a release — update the package managers
 
-- **Scoop:** this repo *is* the bucket — bump `version`/`hash`/`url` in `bucket/wslm.json` (or
-  rely on the `autoupdate` block + `checkver`).
+- **Scoop:** bump `version`/`hash`/`url` in `bucket/wslm.json` in the
+  [nakaba-lab/scoop-bucket](https://github.com/nakaba-lab/scoop-bucket) repo (or rely on its
+  `autoupdate` block + `checkver`).
 - **winget:** `wingetcreate update nakaba-lab.wslm --version X.Y.Z --urls <new-exe-url>`
   then submit the PR (see `docs/launch/launch-runbook.md`).
 - **crates.io:** `cargo publish` (only if the crate metadata changed meaningfully).

@@ -107,10 +107,10 @@ a single self-contained executable with no install step.
 
 ### Install with Scoop
 
-This repository doubles as its own [Scoop](https://scoop.sh) bucket:
+`wslm` is published in the [nakaba-lab Scoop bucket](https://github.com/nakaba-lab/scoop-bucket):
 
 ```powershell
-scoop bucket add wslm https://github.com/nakaba-lab/wsl-manager-tui
+scoop bucket add nakaba-lab https://github.com/nakaba-lab/scoop-bucket
 scoop install wslm
 ```
 
